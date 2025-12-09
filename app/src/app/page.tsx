@@ -5,7 +5,6 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { WelcomeView } from "@/components/views/welcome-view";
 import { BoardView } from "@/components/views/board-view";
 import { SpecView } from "@/components/views/spec-view";
-import { CodeView } from "@/components/views/code-view";
 import { AgentView } from "@/components/views/agent-view";
 import { SettingsView } from "@/components/views/settings-view";
 import { AgentToolsView } from "@/components/views/agent-tools-view";
@@ -65,8 +64,6 @@ export default function Home() {
         return <BoardView />;
       case "spec":
         return <SpecView />;
-      case "code":
-        return <CodeView />;
       case "agent":
         return <AgentView />;
       case "settings":

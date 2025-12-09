@@ -10,7 +10,6 @@ import {
   Settings,
   FileText,
   LayoutGrid,
-  Code,
   Bot,
   ChevronLeft,
   ChevronRight,
@@ -69,7 +68,6 @@ export function Sidebar() {
       items: [
         { id: "spec", label: "Spec Editor", icon: FileText },
         { id: "context", label: "Context", icon: BookOpen },
-        { id: "code", label: "Code View", icon: Code },
         { id: "tools", label: "Agent Tools", icon: Wrench },
       ],
     },

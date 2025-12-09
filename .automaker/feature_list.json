@@ -25,7 +25,7 @@
     "category": "Kanban",
     "description": "Make in progress column  double width so that the cards display 2 columns masonry layout",
     "steps": [],
-    "status": "in_progress"
+    "status": "verified"
   },
   {
     "id": "feature-1765262430461-vennhg2b5",
@@ -60,7 +60,13 @@
     "category": "Core",
     "description": "remove the code view link",
     "steps": [],
-    "status": "in_progress",
-    "startedAt": "2025-12-09T07:12:24.361Z"
+    "status": "verified"
+  },
+  {
+    "id": "feature-1765264472003-ikdarjmlw",
+    "category": "Core",
+    "description": "Add shortcuts keys to all left navigation links, then add shortcuts to the add buttons on the routes (such as kanbam add feature). mske sure they don't mess with normal input or textarea typing or typeaheads. display the shortkey in link or button for users to know (K)",
+    "steps": [],
+    "status": "in_progress"
   }
 ]
