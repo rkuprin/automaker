@@ -990,7 +990,7 @@ export function BoardView() {
         <DialogContent
           data-testid="add-feature-dialog"
           onKeyDown={(e) => {
-            if (e.shiftKey && e.key === "Enter" && newFeature.description) {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && newFeature.description) {
               e.preventDefault();
               handleAddFeature();
             }
@@ -1091,7 +1091,7 @@ export function BoardView() {
                 className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded bg-white/10 border border-white/20"
                 data-testid="shortcut-confirm-add-feature"
               >
-                ⇧↵
+                ⌘↵
               </span>
             </Button>
           </DialogFooter>

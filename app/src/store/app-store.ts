@@ -52,6 +52,7 @@ export interface Feature {
   status: "backlog" | "in_progress" | "verified";
   images?: FeatureImage[];
   startedAt?: string; // ISO timestamp for when the card moved to in_progress
+  skipTests?: boolean; // When true, skip TDD approach and require manual verification
 }
 
 export interface AppState {

@@ -4,32 +4,28 @@
     "category": "Core",
     "description": "After a category has been created we should persist that somewhere such as in the .automaker directory in a .json file so that all the categories of future items I add in will persist even if I delete all the cards.",
     "steps": [],
-    "status": "in_progress",
-    "startedAt": "2025-12-09T13:30:14.509Z"
+    "status": "in_progress"
   },
   {
     "id": "feature-1765287004835-d2c5aqdkr",
     "category": "Core",
     "description": "I need to add the ability on the Kanban cards to enable or disable if it's going to do the whole test driven development approach. Sometimes the task is so easy I don't need it to write tests for, but... And if it is a task that did not have a test, a user should manually be able to click a verified button when it's in the in progress column and the agent is done. I'll have to manually verify it.  So this might change the logic a little bit to allow dragging of cards when they aren't tested automatically from the in progress column back to verified and from verified back to in progress. But keep the existing functionality if it is a test automated card and prevent the dragging.",
     "steps": [],
-    "status": "in_progress",
-    "startedAt": "2025-12-09T13:35:12.427Z"
+    "status": "in_progress"
   },
   {
     "id": "feature-1765287091626-ceoj6xld8",
     "category": "Kanban",
     "description": "Show a confirmed dialog when I click on the trash icon for deleting a card. Use the existing dialog that we have in the components directory for this.",
     "steps": [],
-    "status": "in_progress",
-    "startedAt": "2025-12-09T13:32:24.947Z"
+    "status": "verified"
   },
   {
     "id": "feature-1765287114711-fgypwhnvt",
     "category": "Kanban",
     "description": "When adding a new feature inside the modal there's an add feature button. Can you add a shortcut of shift? Enter which if you click shift enter I'll automatically add it in",
     "steps": [],
-    "status": "in_progress",
-    "startedAt": "2025-12-09T13:32:25.263Z"
+    "status": "in_progress"
   },
   {
     "id": "feature-1765287141131-dz489etgj",
@@ -37,6 +33,22 @@
     "description": "When I edit a card, it's showing an input for the description refactor to also show a text area for description like we do on the add card, add feature card.",
     "steps": [],
     "status": "in_progress",
-    "startedAt": "2025-12-09T13:32:25.469Z"
+    "startedAt": "2025-12-09T13:41:48.094Z"
+  },
+  {
+    "id": "feature-1765287613626-z01cksyg6",
+    "category": "Core",
+    "description": "I'm noticing that when cards finish running, sometimes Cloud Code will update the featureless JSON and restore old state. I think instead of actually modifying the featureless JSON manually, it should call an custom tool, and that tool should update a card directly into the JSON so that Cloud Code isn't potentially messing with other things. All it needs to do is just pass in an ID and a status, and that's going to update in the JSON list.",
+    "steps": [],
+    "status": "in_progress",
+    "startedAt": "2025-12-09T13:41:44.176Z"
+  },
+  {
+    "id": "feature-1765287638726-rtxxdpobi",
+    "category": "Kanban",
+    "description": " Change the shortcut key for the add new feature from shift enter to command enter",
+    "steps": [],
+    "status": "in_progress",
+    "startedAt": "2025-12-09T13:40:55.298Z"
   }
 ]

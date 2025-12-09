@@ -150,6 +150,11 @@ export const getElectronAPI = (): ElectronAPI => {
       }
       // Return mock data based on file type
       if (filePath.endsWith("feature_list.json")) {
+        // Check if test has set mock features via global variable
+        const testFeatures = (window as any).__mockFeatures;
+        if (testFeatures !== undefined) {
+          return { success: true, content: JSON.stringify(testFeatures, null, 2) };
+        }
         return { success: true, content: JSON.stringify(mockFeatures, null, 2) };
       }
       if (filePath.endsWith("categories.json")) {
@@ -288,6 +293,10 @@ export const getElectronAPI = (): ElectronAPI => {
     exists: async (filePath: string) => {
       // Check if file exists in mock file system (including newly created files)
       if (mockFileSystem[filePath] !== undefined) {
+        return true;
+      }
+      // Check if test has set mock features via global variable
+      if (filePath.endsWith("feature_list.json") && (window as any).__mockFeatures !== undefined) {
         return true;
       }
       // Legacy mock files for backwards compatibility
