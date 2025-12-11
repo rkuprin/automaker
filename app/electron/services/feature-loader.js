@@ -170,22 +170,8 @@ class FeatureLoader {
         const featureJsonPath = this.getFeatureJsonPath(projectPath, featureId);
 
         try {
-          // Check if feature.json exists before trying to read it
-          try {
-            await fs.access(featureJsonPath);
-          } catch (accessError) {
-            // File doesn't exist - this is expected for incomplete feature directories
-            // Skip silently or log at debug level only
-            if (accessError.code !== "ENOENT") {
-              console.warn(
-                `[FeatureLoader] Cannot access feature.json for ${featureId}:`,
-                accessError.message
-              );
-            }
-            // Skip this directory - it doesn't have a valid feature.json
-            continue;
-          }
-
+          // Read feature.json directly - handle ENOENT in catch block
+          // This avoids TOCTOU race condition from checking with fs.access first
           const content = await fs.readFile(featureJsonPath, "utf-8");
           const feature = JSON.parse(content);
           
@@ -201,10 +187,9 @@ class FeatureLoader {
         } catch (error) {
           // Handle different error types appropriately
           if (error.code === "ENOENT") {
-            // File was deleted between access check and read - skip silently
-            console.debug(
-              `[FeatureLoader] Feature ${featureId} was removed, skipping`
-            );
+            // File doesn't exist - this is expected for incomplete feature directories
+            // Skip silently (feature.json not yet created or was removed)
+            continue;
           } else if (error instanceof SyntaxError) {
             // JSON parse error - log as warning since file exists but is malformed
             console.warn(
