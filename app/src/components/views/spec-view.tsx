@@ -40,9 +40,6 @@ export function SpecView() {
   // Generate features only state
   const [isGeneratingFeatures, setIsGeneratingFeatures] = useState(false);
   
-  // Logs state (kept for internal tracking, but UI removed)
-  const [logs, setLogs] = useState<string>("");
-  const logsRef = useRef<string>("");
   
   // Phase tracking and status
   const [currentPhase, setCurrentPhase] = useState<string>("");
