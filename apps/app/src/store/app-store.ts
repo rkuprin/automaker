@@ -145,6 +145,7 @@ export interface KeyboardShortcuts {
   context: string;
   settings: string;
   profiles: string;
+  terminal: string;
 
   // UI shortcuts
   toggleSidebar: string;
@@ -170,6 +171,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   context: "C",
   settings: "S",
   profiles: "M",
+  terminal: "Cmd+`",
 
   // UI
   toggleSidebar: "`",
