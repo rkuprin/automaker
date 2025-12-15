@@ -66,7 +66,7 @@ The future of software development is **agentic coding**—where developers beco
 
 ```bash
 # 1. Clone the repo
-git clone git@github.com:AutoMaker-Org/automaker.git
+git clone https://github.com/AutoMaker-Org/automaker.git
 cd automaker
 
 # 2. Install dependencies
