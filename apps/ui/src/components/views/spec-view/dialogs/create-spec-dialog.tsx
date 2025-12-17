@@ -1,5 +1,4 @@
-
-import { Sparkles, Clock } from "lucide-react";
+import { Sparkles, Clock, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,66 +8,49 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { HotkeyButton } from "@/components/ui/hotkey-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { FEATURE_COUNT_OPTIONS } from "../constants";
+import type { CreateSpecDialogProps, FeatureCount } from "../types";
 
-// Feature count options
-export type FeatureCount = 20 | 50 | 100;
-const FEATURE_COUNT_OPTIONS: {
-  value: FeatureCount;
-  label: string;
-  warning?: string;
-}[] = [
-  { value: 20, label: "20" },
-  { value: 50, label: "50", warning: "May take up to 5 minutes" },
-  { value: 100, label: "100", warning: "May take up to 5 minutes" },
-];
-
-interface ProjectSetupDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  projectOverview: string;
-  onProjectOverviewChange: (value: string) => void;
-  generateFeatures: boolean;
-  onGenerateFeaturesChange: (value: boolean) => void;
-  featureCount: FeatureCount;
-  onFeatureCountChange: (value: FeatureCount) => void;
-  onCreateSpec: () => void;
-  onSkip: () => void;
-  isCreatingSpec: boolean;
-}
-
-export function ProjectSetupDialog({
+export function CreateSpecDialog({
   open,
   onOpenChange,
   projectOverview,
   onProjectOverviewChange,
   generateFeatures,
   onGenerateFeaturesChange,
+  analyzeProject,
+  onAnalyzeProjectChange,
   featureCount,
   onFeatureCountChange,
   onCreateSpec,
   onSkip,
   isCreatingSpec,
-}: ProjectSetupDialogProps) {
+  showSkipButton = false,
+  title = "Create App Specification",
+  description = "We didn't find an app_spec.txt file. Let us help you generate your app_spec.txt to help describe your project for our system. We'll analyze your project's tech stack and create a comprehensive specification.",
+}: CreateSpecDialogProps) {
+  const selectedOption = FEATURE_COUNT_OPTIONS.find(
+    (o) => o.value === featureCount
+  );
+
   return (
     <Dialog
       open={open}
       onOpenChange={(open) => {
         onOpenChange(open);
-        if (!open && !isCreatingSpec) {
+        if (!open && !isCreatingSpec && onSkip) {
           onSkip();
         }
       }}
     >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Set Up Your Project</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            We didn&apos;t find an app_spec.txt file. Let us help you generate
-            your app_spec.txt to help describe your project for our system.
-            We&apos;ll analyze your project&apos;s tech stack and create a
-            comprehensive specification.
+            {description}
           </DialogDescription>
         </DialogHeader>
 
@@ -86,21 +68,52 @@ export function ProjectSetupDialog({
               onChange={(e) => onProjectOverviewChange(e.target.value)}
               placeholder="e.g., A project management tool that allows teams to track tasks, manage sprints, and visualize progress through kanban boards. It should support user authentication, real-time updates, and file attachments..."
               autoFocus
+              disabled={isCreatingSpec}
             />
           </div>
 
           <div className="flex items-start space-x-3 pt-2">
             <Checkbox
-              id="sidebar-generate-features"
+              id="create-analyze-project"
+              checked={analyzeProject}
+              onCheckedChange={(checked) =>
+                onAnalyzeProjectChange(checked === true)
+              }
+              disabled={isCreatingSpec}
+            />
+            <div className="space-y-1">
+              <label
+                htmlFor="create-analyze-project"
+                className={`text-sm font-medium ${
+                  isCreatingSpec ? "" : "cursor-pointer"
+                }`}
+              >
+                Analyze current project for additional context
+              </label>
+              <p className="text-xs text-muted-foreground">
+                If checked, the agent will research your existing codebase to
+                understand the tech stack. If unchecked, defaults to TanStack
+                Start, Drizzle ORM, PostgreSQL, shadcn/ui, Tailwind CSS, and
+                React.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3 pt-2">
+            <Checkbox
+              id="create-generate-features"
               checked={generateFeatures}
               onCheckedChange={(checked) =>
                 onGenerateFeaturesChange(checked === true)
               }
+              disabled={isCreatingSpec}
             />
             <div className="space-y-1">
               <label
-                htmlFor="sidebar-generate-features"
-                className="text-sm font-medium cursor-pointer"
+                htmlFor="create-generate-features"
+                className={`text-sm font-medium ${
+                  isCreatingSpec ? "" : "cursor-pointer"
+                }`}
               >
                 Generate feature list
               </label>
@@ -124,7 +137,10 @@ export function ProjectSetupDialog({
                       featureCount === option.value ? "default" : "outline"
                     }
                     size="sm"
-                    onClick={() => onFeatureCountChange(option.value)}
+                    onClick={() =>
+                      onFeatureCountChange(option.value as FeatureCount)
+                    }
+                    disabled={isCreatingSpec}
                     className={cn(
                       "flex-1 transition-all",
                       featureCount === option.value
@@ -137,14 +153,10 @@ export function ProjectSetupDialog({
                   </Button>
                 ))}
               </div>
-              {FEATURE_COUNT_OPTIONS.find((o) => o.value === featureCount)
-                ?.warning && (
+              {selectedOption?.warning && (
                 <p className="text-xs text-amber-500 flex items-center gap-1">
                   <Clock className="w-3 h-3" />
-                  {
-                    FEATURE_COUNT_OPTIONS.find((o) => o.value === featureCount)
-                      ?.warning
-                  }
+                  {selectedOption.warning}
                 </p>
               )}
             </div>
@@ -152,13 +164,37 @@ export function ProjectSetupDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onSkip}>
-            Skip for now
-          </Button>
-          <Button onClick={onCreateSpec} disabled={!projectOverview.trim()}>
-            <Sparkles className="w-4 h-4 mr-2" />
-            Generate Spec
-          </Button>
+          {showSkipButton && onSkip ? (
+            <Button variant="ghost" onClick={onSkip} disabled={isCreatingSpec}>
+              Skip for now
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isCreatingSpec}
+            >
+              Cancel
+            </Button>
+          )}
+          <HotkeyButton
+            onClick={onCreateSpec}
+            disabled={!projectOverview.trim() || isCreatingSpec}
+            hotkey={{ key: "Enter", cmdCtrl: true }}
+            hotkeyActive={open && !isCreatingSpec}
+          >
+            {isCreatingSpec ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 mr-2" />
+                Generate Spec
+              </>
+            )}
+          </HotkeyButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -81,10 +81,8 @@ import { themeOptions } from "@/config/theme-options";
 import type { SpecRegenerationEvent } from "@/types/electron";
 import { DeleteProjectDialog } from "@/components/views/settings-view/components/delete-project-dialog";
 import { NewProjectModal } from "@/components/new-project-modal";
-import {
-  ProjectSetupDialog,
-  type FeatureCount,
-} from "@/components/layout/project-setup-dialog";
+import { CreateSpecDialog } from "@/components/views/spec-view/dialogs";
+import type { FeatureCount } from "@/components/views/spec-view/types";
 import {
   DndContext,
   DragEndEvent,
@@ -290,6 +288,7 @@ export function Sidebar() {
   const [setupProjectPath, setSetupProjectPath] = useState("");
   const [projectOverview, setProjectOverview] = useState("");
   const [generateFeatures, setGenerateFeatures] = useState(true);
+  const [analyzeProject, setAnalyzeProject] = useState(true);
   const [featureCount, setFeatureCount] = useState<FeatureCount>(50);
   const [showSpecIndicator, setShowSpecIndicator] = useState(true);
 
@@ -496,7 +495,7 @@ export function Sidebar() {
         setupProjectPath,
         projectOverview.trim(),
         generateFeatures,
-        undefined, // analyzeProject - use default
+        analyzeProject,
         generateFeatures ? featureCount : undefined // only pass maxFeatures if generating features
       );
 
@@ -525,6 +524,7 @@ export function Sidebar() {
     setupProjectPath,
     projectOverview,
     generateFeatures,
+    analyzeProject,
     featureCount,
     setSpecCreatingForProject,
   ]);
@@ -2276,18 +2276,23 @@ export function Sidebar() {
       </Dialog>
 
       {/* New Project Setup Dialog */}
-      <ProjectSetupDialog
+      <CreateSpecDialog
         open={showSetupDialog}
         onOpenChange={setShowSetupDialog}
         projectOverview={projectOverview}
         onProjectOverviewChange={setProjectOverview}
         generateFeatures={generateFeatures}
         onGenerateFeaturesChange={setGenerateFeatures}
+        analyzeProject={analyzeProject}
+        onAnalyzeProjectChange={setAnalyzeProject}
         featureCount={featureCount}
         onFeatureCountChange={setFeatureCount}
         onCreateSpec={handleCreateInitialSpec}
         onSkip={handleSkipSetup}
         isCreatingSpec={isCreatingSpec}
+        showSkipButton={true}
+        title="Set Up Your Project"
+        description="We didn't find an app_spec.txt file. Let us help you generate your app_spec.txt to help describe your project for our system. We'll analyze your project's tech stack and create a comprehensive specification."
       />
 
       {/* New Project Onboarding Dialog */}
