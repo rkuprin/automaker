@@ -5,16 +5,7 @@
  * Uses a modified Kahn's algorithm that respects both dependencies and priorities.
  */
 
-interface Feature {
-  id: string;
-  category: string;
-  description: string;
-  steps?: string[];
-  status: string;
-  priority?: number;
-  dependencies?: string[];
-  [key: string]: unknown;
-}
+import type { Feature } from "../services/feature-loader.js";
 
 export interface DependencyResolutionResult {
   orderedFeatures: Feature[];       // Features in dependency-aware order
@@ -198,7 +189,7 @@ export function areDependenciesSatisfied(
     return true; // No dependencies = always ready
   }
 
-  return feature.dependencies.every(depId => {
+  return feature.dependencies.every((depId: string) => {
     const dep = allFeatures.find(f => f.id === depId);
     return dep && (dep.status === 'completed' || dep.status === 'verified');
   });
@@ -219,7 +210,7 @@ export function getBlockingDependencies(
     return [];
   }
 
-  return feature.dependencies.filter(depId => {
+  return feature.dependencies.filter((depId: string) => {
     const dep = allFeatures.find(f => f.id === depId);
     return dep && dep.status !== 'completed' && dep.status !== 'verified';
   });

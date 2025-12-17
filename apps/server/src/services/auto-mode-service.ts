@@ -21,29 +21,9 @@ import { resolveModelString, DEFAULT_MODELS } from "../lib/model-resolver.js";
 import { createAutoModeOptions } from "../lib/sdk-options.js";
 import { isAbortError, classifyError } from "../lib/error-handler.js";
 import { resolveDependencies, areDependenciesSatisfied } from "../lib/dependency-resolver.js";
+import type { Feature } from "./feature-loader.js";
 
 const execAsync = promisify(exec);
-
-interface Feature {
-  id: string;
-  category: string;
-  description: string;
-  steps?: string[];
-  status: string;
-  priority?: number;
-  dependencies?: string[]; // Feature dependencies
-  spec?: string;
-  model?: string; // Model to use for this feature
-  imagePaths?: Array<
-    | string
-    | {
-        path: string;
-        filename?: string;
-        mimeType?: string;
-        [key: string]: unknown;
-      }
-  >;
-}
 
 interface RunningFeature {
   featureId: string;
