@@ -18,37 +18,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup project
+        uses: ./.github/actions/setup-project
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
-
-      - name: Configure Git for HTTPS
-        # Convert SSH URLs to HTTPS for git dependencies (e.g., @electron/node-gyp)
-        # This is needed because SSH authentication isn't available in CI
-        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
-
-      - name: Install dependencies
-        # Use npm install instead of npm ci to correctly resolve platform-specific
-        # optional dependencies (e.g., @tailwindcss/oxide, lightningcss binaries)
-        # Skip scripts to avoid electron-builder install-app-deps which uses too much memory
-        run: npm install --ignore-scripts
-
-      - name: Install Linux native bindings
-        # Workaround for npm optional dependencies bug (npm/cli#4828)
-        # Explicitly install Linux bindings needed for build tools
-        run: |
-          npm install --no-save --force --ignore-scripts \
-            @rollup/rollup-linux-x64-gnu@4.53.3 \
-            @tailwindcss/oxide-linux-x64-gnu@4.1.17
-
-      - name: Rebuild native modules
-        # Rebuild node-pty and other native modules needed for server
-        # This is separate from electron-builder install-app-deps to avoid OOM
-        run: npm rebuild node-pty
-        working-directory: apps/server
+          check-lockfile: "true"
+          rebuild-node-pty-path: "apps/server"
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
