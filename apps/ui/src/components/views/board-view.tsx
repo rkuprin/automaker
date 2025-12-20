@@ -39,6 +39,7 @@ import { CommitWorktreeDialog } from "./board-view/dialogs/commit-worktree-dialo
 import { CreatePRDialog } from "./board-view/dialogs/create-pr-dialog";
 import { CreateBranchDialog } from "./board-view/dialogs/create-branch-dialog";
 import { WorktreePanel } from "./board-view/worktree-panel";
+import type { PRInfo, WorktreeInfo } from "./board-view/worktree-panel/types";
 import { COLUMNS } from "./board-view/constants";
 import {
   useBoardFeatures,
@@ -414,6 +415,95 @@ export function BoardView() {
     onWorktreeCreated: () => setWorktreeRefreshKey((k) => k + 1),
     currentWorktreeBranch,
   });
+
+  // Handler for addressing PR comments - creates a feature and starts it automatically
+  const handleAddressPRComments = useCallback(
+    async (worktree: WorktreeInfo, prInfo: PRInfo) => {
+      // If comments are empty, fetch them from GitHub
+      let fullPRInfo = prInfo;
+      if (prInfo.comments.length === 0 && prInfo.reviewComments.length === 0) {
+        try {
+          const api = getElectronAPI();
+          if (api?.worktree?.getPRInfo) {
+            const result = await api.worktree.getPRInfo(
+              worktree.path,
+              worktree.branch
+            );
+            if (result.success && result.result?.hasPR && result.result.prInfo) {
+              fullPRInfo = result.result.prInfo;
+            }
+          }
+        } catch (error) {
+          console.error("[Board] Failed to fetch PR comments:", error);
+        }
+      }
+
+      // Format PR comments into a feature description
+      const allComments = [
+        ...fullPRInfo.comments.map((c) => ({
+          ...c,
+          type: "comment" as const,
+        })),
+        ...fullPRInfo.reviewComments.map((c) => ({
+          ...c,
+          type: "review" as const,
+        })),
+      ].sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+
+      let description = `Address PR #${fullPRInfo.number} feedback: "${fullPRInfo.title}"\n\n`;
+      description += `PR URL: ${fullPRInfo.url}\n\n`;
+
+      if (allComments.length === 0) {
+        description += `No comments found on this PR yet. Check the PR for any new feedback.\n`;
+      } else {
+        description += `## Feedback to address:\n\n`;
+        for (const comment of allComments) {
+          if (comment.type === "review" && comment.path) {
+            description += `### ${comment.path}${comment.line ? `:${comment.line}` : ""}\n`;
+          }
+          description += `**@${comment.author}:**\n${comment.body}\n\n`;
+        }
+      }
+
+      // Create the feature
+      const featureData = {
+        category: "PR Review",
+        description: description.trim(),
+        steps: [],
+        images: [],
+        imagePaths: [],
+        skipTests: defaultSkipTests,
+        model: "sonnet" as const,
+        thinkingLevel: "medium" as const,
+        branchName: worktree.branch,
+        priority: 1, // High priority for PR feedback
+        planningMode: "skip" as const,
+        requirePlanApproval: false,
+      };
+
+      await handleAddFeature(featureData);
+
+      // Find the newly created feature and start it
+      // We need to wait a moment for the feature to be created
+      setTimeout(async () => {
+        const latestFeatures = useAppStore.getState().features;
+        const newFeature = latestFeatures.find(
+          (f) =>
+            f.branchName === worktree.branch &&
+            f.status === "backlog" &&
+            f.description.includes(`PR #${fullPRInfo.number}`)
+        );
+
+        if (newFeature) {
+          await handleStartImplementation(newFeature);
+        }
+      }, 500);
+    },
+    [handleAddFeature, handleStartImplementation, defaultSkipTests]
+  );
 
   // Client-side auto mode: periodically check for backlog items and move them to in-progress
   // Use a ref to track the latest auto mode state so async operations always check the current value
@@ -874,6 +964,7 @@ export function BoardView() {
           setSelectedWorktreeForAction(worktree);
           setShowCreateBranchDialog(true);
         }}
+        onAddressPRComments={handleAddressPRComments}
         onRemovedWorktrees={handleRemovedWorktrees}
         runningFeatureIds={runningAutoTasks}
         branchCardCounts={branchCardCounts}
@@ -1153,6 +1244,7 @@ export function BoardView() {
         open={showCreatePRDialog}
         onOpenChange={setShowCreatePRDialog}
         worktree={selectedWorktreeForAction}
+<<<<<<< Updated upstream
         onCreated={(prUrl) => {
           // If a PR was created and we have the worktree branch, update all features on that branch with the PR URL
           if (prUrl && selectedWorktreeForAction?.branch) {
@@ -1164,6 +1256,10 @@ export function BoardView() {
                 persistFeatureUpdate(feature.id, { prUrl });
               });
           }
+=======
+        projectPath={currentProject?.path || null}
+        onCreated={() => {
+>>>>>>> Stashed changes
           setWorktreeRefreshKey((k) => k + 1);
           setSelectedWorktreeForAction(null);
         }}

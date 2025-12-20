@@ -29,13 +29,19 @@ interface CreatePRDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
+<<<<<<< Updated upstream
   onCreated: (prUrl?: string) => void;
+=======
+  projectPath: string | null;
+  onCreated: () => void;
+>>>>>>> Stashed changes
 }
 
 export function CreatePRDialog({
   open,
   onOpenChange,
   worktree,
+  projectPath,
   onCreated,
 }: CreatePRDialogProps) {
   const [title, setTitle] = useState("");
@@ -96,6 +102,7 @@ export function CreatePRDialog({
         return;
       }
       const result = await api.worktree.createPR(worktree.path, {
+        projectPath: projectPath || undefined,
         commitMessage: commitMessage || undefined,
         prTitle: title || worktree.branch,
         prBody: body || `Changes from branch ${worktree.branch}`,
@@ -108,13 +115,25 @@ export function CreatePRDialog({
           setPrUrl(result.result.prUrl);
           // Mark operation as completed for refresh on close
           operationCompletedRef.current = true;
-          toast.success("Pull request created!", {
-            description: `PR created from ${result.result.branch}`,
-            action: {
-              label: "View PR",
-              onClick: () => window.open(result.result!.prUrl!, "_blank"),
-            },
-          });
+
+          // Show different message based on whether PR already existed
+          if (result.result.prAlreadyExisted) {
+            toast.success("Pull request found!", {
+              description: `PR already exists for ${result.result.branch}`,
+              action: {
+                label: "View PR",
+                onClick: () => window.open(result.result!.prUrl!, "_blank"),
+              },
+            });
+          } else {
+            toast.success("Pull request created!", {
+              description: `PR created from ${result.result.branch}`,
+              action: {
+                label: "View PR",
+                onClick: () => window.open(result.result!.prUrl!, "_blank"),
+              },
+            });
+          }
           // Don't call onCreated() here - keep dialog open to show success message
           // onCreated() will be called when user closes the dialog
         } else {

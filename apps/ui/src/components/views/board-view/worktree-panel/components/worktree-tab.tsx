@@ -1,5 +1,6 @@
 
 import { Button } from "@/components/ui/button";
+<<<<<<< Updated upstream
 import { RefreshCw, Globe, Loader2, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -9,6 +10,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { WorktreeInfo, BranchInfo, DevServerInfo } from "../types";
+=======
+import { RefreshCw, Globe, Loader2, GitPullRequest } from "lucide-react";
+import { cn } from "@/lib/utils";
+import type { WorktreeInfo, BranchInfo, DevServerInfo, PRInfo } from "../types";
+>>>>>>> Stashed changes
 import { BranchSwitchDropdown } from "./branch-switch-dropdown";
 import { WorktreeActionsDropdown } from "./worktree-actions-dropdown";
 
@@ -44,6 +50,7 @@ interface WorktreeTabProps {
   onOpenInEditor: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
+  onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onDeleteWorktree: (worktree: WorktreeInfo) => void;
   onStartDevServer: (worktree: WorktreeInfo) => void;
   onStopDevServer: (worktree: WorktreeInfo) => void;
@@ -82,11 +89,13 @@ export function WorktreeTab({
   onOpenInEditor,
   onCommit,
   onCreatePR,
+  onAddressPRComments,
   onDeleteWorktree,
   onStartDevServer,
   onStopDevServer,
   onOpenDevServerUrl,
 }: WorktreeTabProps) {
+<<<<<<< Updated upstream
   // Determine border color based on state:
   // - Running features: cyan border (high visibility, indicates active work)
   // - Uncommitted changes: amber border (warning state, needs attention)
@@ -102,6 +111,93 @@ export function WorktreeTab({
   };
 
   const borderClasses = getBorderClasses();
+=======
+  let prBadge: JSX.Element | null = null;
+  if (worktree.pr) {
+    const prState = worktree.pr.state?.toLowerCase() ?? "open";
+    const prStateClasses = (() => {
+      // When selected (active tab), use high contrast solid background (paper-like)
+      if (isSelected) {
+        return "bg-background text-foreground border-transparent shadow-sm";
+      }
+
+      // When not selected, use the colored variants
+      switch (prState) {
+        case "open":
+        case "reopened":
+          return "bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-500/40 hover:bg-emerald-500/25";
+        case "draft":
+          return "bg-amber-500/15 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40 hover:bg-amber-500/25";
+        case "merged":
+          return "bg-purple-500/15 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30 dark:border-purple-500/40 hover:bg-purple-500/25";
+        case "closed":
+          return "bg-rose-500/15 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30 dark:border-rose-500/40 hover:bg-rose-500/25";
+        default:
+          return "bg-muted text-muted-foreground border-border/60 hover:bg-muted/80";
+      }
+    })();
+
+    const prTitle = worktree.pr.title || `Pull Request #${worktree.pr.number}`;
+    const prLabel = `Pull Request #${worktree.pr.number}, ${prState}${worktree.pr.title ? `: ${worktree.pr.title}` : ""}`;
+
+    // Helper to get status icon color for the selected state
+    const getStatusColorClass = () => {
+      if (!isSelected) return "";
+      switch (prState) {
+        case "open":
+        case "reopened":
+          return "text-emerald-600 dark:text-emerald-500";
+        case "draft":
+          return "text-amber-600 dark:text-amber-500";
+        case "merged":
+          return "text-purple-600 dark:text-purple-500";
+        case "closed":
+          return "text-rose-600 dark:text-rose-500";
+        default:
+          return "text-muted-foreground";
+      }
+    };
+
+    prBadge = (
+      <button
+        type="button"
+        className={cn(
+          "ml-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+          "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 focus:ring-offset-background",
+          "appearance-none cursor-pointer", // Reset button appearance but keep cursor
+          prStateClasses
+        )}
+        style={{
+          // Override any inherited button styles
+          backgroundImage: "none",
+          boxShadow: "none",
+        }}
+        title={prLabel}
+        aria-label={prLabel}
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent triggering worktree selection
+          window.open(worktree.pr.url, "_blank", "noopener,noreferrer");
+        }}
+        onKeyDown={(e) => {
+          // Prevent event from bubbling to parent button
+          e.stopPropagation();
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            window.open(worktree.pr.url, "_blank", "noopener,noreferrer");
+          }
+        }}
+      >
+        <GitPullRequest className={cn("w-3 h-3", getStatusColorClass())} aria-hidden="true" />
+        <span aria-hidden="true" className={isSelected ? "text-foreground font-semibold" : ""}>
+          #{worktree.pr.number}
+        </span>
+        <span className={cn("capitalize", getStatusColorClass())} aria-hidden="true">
+          {prState}
+        </span>
+      </button>
+    );
+  }
+>>>>>>> Stashed changes
 
   return (
     <div className={cn("flex items-center rounded-md", borderClasses)}>
@@ -129,6 +225,7 @@ export function WorktreeTab({
                 {cardCount}
               </span>
             )}
+<<<<<<< Updated upstream
             {hasChanges && (
               <TooltipProvider>
                 <Tooltip>
@@ -149,6 +246,9 @@ export function WorktreeTab({
                 </Tooltip>
               </TooltipProvider>
             )}
+=======
+            {prBadge}
+>>>>>>> Stashed changes
           </Button>
           <BranchSwitchDropdown
             worktree={worktree}
@@ -192,6 +292,7 @@ export function WorktreeTab({
               {cardCount}
             </span>
           )}
+<<<<<<< Updated upstream
           {hasChanges && (
             <TooltipProvider>
               <Tooltip>
@@ -212,6 +313,9 @@ export function WorktreeTab({
               </Tooltip>
             </TooltipProvider>
           )}
+=======
+          {prBadge}
+>>>>>>> Stashed changes
         </Button>
       )}
 
@@ -249,6 +353,7 @@ export function WorktreeTab({
         onOpenInEditor={onOpenInEditor}
         onCommit={onCommit}
         onCreatePR={onCreatePR}
+        onAddressPRComments={onAddressPRComments}
         onDeleteWorktree={onDeleteWorktree}
         onStartDevServer={onStartDevServer}
         onStopDevServer={onStopDevServer}

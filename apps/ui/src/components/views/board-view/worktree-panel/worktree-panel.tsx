@@ -20,6 +20,7 @@ export function WorktreePanel({
   onCommit,
   onCreatePR,
   onCreateBranch,
+  onAddressPRComments,
   onRemovedWorktrees,
   runningFeatureIds = [],
   features = [],
@@ -146,6 +147,7 @@ export function WorktreePanel({
               onOpenInEditor={handleOpenInEditor}
               onCommit={onCommit}
               onCreatePR={onCreatePR}
+              onAddressPRComments={onAddressPRComments}
               onDeleteWorktree={onDeleteWorktree}
               onStartDevServer={handleStartDevServer}
               onStopDevServer={handleStopDevServer}
