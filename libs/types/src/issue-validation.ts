@@ -109,6 +109,11 @@ export type IssueValidationEvent =
       issueNumber: number;
       error: string;
       projectPath: string;
+    }
+  | {
+      type: 'issue_validation_viewed';
+      issueNumber: number;
+      projectPath: string;
     };
 
 /**

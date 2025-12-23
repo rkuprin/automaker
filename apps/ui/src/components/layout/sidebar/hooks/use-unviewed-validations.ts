@@ -45,7 +45,11 @@ export function useUnviewedValidations(currentProject: Project | null) {
       const unsubscribe = api.github.onValidationEvent((event) => {
         if (event.projectPath === currentProject.path) {
           if (event.type === 'issue_validation_complete') {
+            // New validation completed - increment count
             setCount((prev) => prev + 1);
+          } else if (event.type === 'issue_validation_viewed') {
+            // Validation was viewed - decrement count
+            setCount((prev) => Math.max(0, prev - 1));
           }
         }
       });

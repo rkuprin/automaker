@@ -3,6 +3,8 @@
  */
 
 import type { Request, Response } from 'express';
+import type { EventEmitter } from '../../../lib/events.js';
+import type { IssueValidationEvent } from '@automaker/types';
 import {
   isValidationRunning,
   getValidationStatus,
@@ -193,7 +195,7 @@ export function createDeleteValidationHandler() {
 /**
  * POST /validation-mark-viewed - Mark a validation as viewed by the user
  */
-export function createMarkViewedHandler() {
+export function createMarkViewedHandler(events: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, issueNumber } = req.body as {
@@ -214,6 +216,16 @@ export function createMarkViewedHandler() {
       }
 
       const success = await markValidationViewed(projectPath, issueNumber);
+
+      if (success) {
+        // Emit event so UI can update the unviewed count
+        const viewedEvent: IssueValidationEvent = {
+          type: 'issue_validation_viewed',
+          issueNumber,
+          projectPath,
+        };
+        events.emit('issue-validation:event', viewedEvent);
+      }
 
       res.json({ success });
     } catch (error) {

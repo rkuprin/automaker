@@ -45,7 +45,7 @@ export function createGitHubRoutes(events: EventEmitter): Router {
   router.post(
     '/validation-mark-viewed',
     validatePathParams('projectPath'),
-    createMarkViewedHandler()
+    createMarkViewedHandler(events)
   );
 
   return router;
