@@ -13,14 +13,17 @@ interface ClaudeMdSettingsProps {
 /**
  * ClaudeMdSettings Component
  *
- * UI control for the autoLoadClaudeMd setting which enables automatic loading
- * of project instructions from .claude/CLAUDE.md files via the Claude Agent SDK.
+ * UI controls for Claude Agent SDK settings including:
+ * - Auto-loading of project instructions from .claude/CLAUDE.md files
+ * - Sandbox mode for isolated bash command execution
  *
  * Usage:
  * ```tsx
  * <ClaudeMdSettings
  *   autoLoadClaudeMd={autoLoadClaudeMd}
  *   onAutoLoadClaudeMdChange={setAutoLoadClaudeMd}
+ *   enableSandboxMode={enableSandboxMode}
+ *   onEnableSandboxModeChange={setEnableSandboxMode}
  * />
  * ```
  */

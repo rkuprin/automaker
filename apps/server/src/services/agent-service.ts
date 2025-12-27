@@ -300,7 +300,6 @@ export class AgentService {
         sdkSessionId: session.sdkSessionId, // Pass SDK session ID for resuming
       };
 
-      console.log('[AgentService] Building prompt with images...');
       // Build prompt content with images
       const { content: promptContent } = await buildPromptWithImages(
         message,
@@ -321,23 +320,12 @@ export class AgentService {
 
       // Execute via provider
       const stream = provider.executeQuery(options);
-      console.log('[AgentService] Stream created, starting to iterate...');
 
       let currentAssistantMessage: Message | null = null;
       let responseText = '';
       const toolUses: Array<{ name: string; input: unknown }> = [];
-      let messageCount = 0;
 
-      console.log('[AgentService] Entering stream loop...');
       for await (const msg of stream) {
-        messageCount++;
-        console.log(`[AgentService] Stream message #${messageCount}:`, {
-          type: msg.type,
-          subtype: (msg as any).subtype,
-          hasContent: !!(msg as any).message?.content,
-          session_id: msg.session_id,
-        });
-
         // Capture SDK session ID from any message and persist it
         if (msg.session_id && !session.sdkSessionId) {
           session.sdkSessionId = msg.session_id;
@@ -347,7 +335,6 @@ export class AgentService {
         }
 
         if (msg.type === 'assistant') {
-          console.log('[AgentService] Processing assistant message...');
           if (msg.message?.content) {
             for (const block of msg.message.content) {
               if (block.type === 'text') {
@@ -391,7 +378,6 @@ export class AgentService {
             }
           }
         } else if (msg.type === 'result') {
-          console.log('[AgentService] Result message received, subtype:', (msg as any).subtype);
           if (msg.subtype === 'success' && msg.result) {
             if (currentAssistantMessage) {
               currentAssistantMessage.content = msg.result;
@@ -408,8 +394,6 @@ export class AgentService {
           });
         }
       }
-
-      console.log('[AgentService] Stream loop completed, total messages:', messageCount);
 
       await this.saveSession(sessionId, session.messages);
 
@@ -825,7 +809,6 @@ export class AgentService {
       dataKeys: Object.keys(data),
     });
     this.events.emit('agent:stream', { sessionId, ...data });
-    console.log('[AgentService] Event emitted to EventEmitter');
   }
 
   private getSystemPrompt(): string {
