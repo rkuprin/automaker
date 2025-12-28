@@ -344,6 +344,7 @@ export interface TerminalState {
   scrollbackLines: number; // Number of lines to keep in scrollback buffer
   lineHeight: number; // Line height multiplier for terminal text
   maxSessions: number; // Maximum concurrent terminal sessions (server setting)
+  lastActiveProjectPath: string | null; // Last project path to detect route changes vs project switches
 }
 
 // Persisted terminal layout - now includes sessionIds for reconnection
@@ -816,6 +817,7 @@ export interface AppActions {
   setTerminalScrollbackLines: (lines: number) => void;
   setTerminalLineHeight: (lineHeight: number) => void;
   setTerminalMaxSessions: (maxSessions: number) => void;
+  setTerminalLastActiveProjectPath: (projectPath: string | null) => void;
   addTerminalTab: (name?: string) => string;
   removeTerminalTab: (tabId: string) => void;
   setActiveTerminalTab: (tabId: string) => void;
@@ -951,6 +953,7 @@ const initialState: AppState = {
     scrollbackLines: 5000,
     lineHeight: 1.0,
     maxSessions: 100,
+    lastActiveProjectPath: null,
   },
   terminalLayoutByProject: {},
   specCreatingForProject: null,
@@ -2037,6 +2040,8 @@ export const useAppStore = create<AppState & AppActions>()(
             scrollbackLines: current.scrollbackLines,
             lineHeight: current.lineHeight,
             maxSessions: current.maxSessions,
+            // Preserve lastActiveProjectPath - it will be updated separately when needed
+            lastActiveProjectPath: current.lastActiveProjectPath,
           },
         });
       },
@@ -2118,6 +2123,13 @@ export const useAppStore = create<AppState & AppActions>()(
         const clampedMax = Math.max(1, Math.min(500, maxSessions));
         set({
           terminalState: { ...current, maxSessions: clampedMax },
+        });
+      },
+
+      setTerminalLastActiveProjectPath: (projectPath) => {
+        const current = get().terminalState;
+        set({
+          terminalState: { ...current, lastActiveProjectPath: projectPath },
         });
       },
 
@@ -2669,6 +2681,7 @@ export const useAppStore = create<AppState & AppActions>()(
             activeTabId: state.terminalState?.activeTabId ?? null,
             activeSessionId: state.terminalState?.activeSessionId ?? null,
             maximizedSessionId: state.terminalState?.maximizedSessionId ?? null,
+            lastActiveProjectPath: state.terminalState?.lastActiveProjectPath ?? null,
             // Restore persisted settings
             defaultFontSize: persistedSettings.defaultFontSize ?? 14,
             defaultRunScript: persistedSettings.defaultRunScript ?? '',
