@@ -294,6 +294,32 @@ export const verifySession = async (): Promise<boolean> => {
   }
 };
 
+/**
+ * Check if the server is running in a containerized (sandbox) environment.
+ * This endpoint is unauthenticated so it can be checked before login.
+ */
+export const checkSandboxEnvironment = async (): Promise<{
+  isContainerized: boolean;
+  error?: string;
+}> => {
+  try {
+    const response = await fetch(`${getServerUrl()}/api/health/environment`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      console.warn('[HTTP Client] Failed to check sandbox environment');
+      return { isContainerized: false, error: 'Failed to check environment' };
+    }
+
+    const data = await response.json();
+    return { isContainerized: data.isContainerized ?? false };
+  } catch (error) {
+    console.error('[HTTP Client] Sandbox environment check failed:', error);
+    return { isContainerized: false, error: 'Network error' };
+  }
+};
+
 type EventType =
   | 'agent:stream'
   | 'auto-mode:event'
@@ -609,14 +635,15 @@ export class HttpApiClient implements ElectronAPI {
     const result = await this.post<{
       success: boolean;
       path?: string;
+      isAllowed?: boolean;
       error?: string;
     }>('/api/fs/validate-path', { filePath: path });
 
-    if (result.success && result.path) {
+    if (result.success && result.path && result.isAllowed !== false) {
       return { canceled: false, filePaths: [result.path] };
     }
 
-    console.error('Invalid directory:', result.error);
+    console.error('Invalid directory:', result.error || 'Path not allowed');
     return { canceled: true, filePaths: [] };
   }
 
@@ -1629,3 +1656,10 @@ export function getHttpApiClient(): HttpApiClient {
   }
   return httpApiClientInstance;
 }
+
+// Start API key initialization immediately when this module is imported
+// This ensures the init promise is created early, even before React components mount
+// The actual async work happens in the background and won't block module loading
+initApiKey().catch((error) => {
+  console.error('[HTTP Client] Failed to initialize API key:', error);
+});

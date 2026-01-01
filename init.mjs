@@ -4,10 +4,14 @@
  * Automaker - Cross-Platform Development Environment Setup and Launch Script
  *
  * This script works on Windows, macOS, and Linux.
+ *
+ * SECURITY NOTE: This script uses a restricted fs wrapper that only allows
+ * operations within the script's directory (__dirname). This is a standalone
+ * launch script that runs before the platform library is available.
  */
 
 import { execSync } from 'child_process';
-import fs from 'fs';
+import fsNative from 'fs';
 import http from 'http';
 import path from 'path';
 import readline from 'readline';
@@ -20,6 +24,45 @@ const crossSpawn = require('cross-spawn');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// =============================================================================
+// Restricted fs wrapper - only allows operations within __dirname
+// =============================================================================
+
+/**
+ * Validate that a path is within the script's directory
+ * @param {string} targetPath - Path to validate
+ * @returns {string} - Resolved path if valid
+ * @throws {Error} - If path is outside __dirname
+ */
+function validateScriptPath(targetPath) {
+  const resolved = path.resolve(__dirname, targetPath);
+  const normalizedBase = path.resolve(__dirname);
+  if (!resolved.startsWith(normalizedBase + path.sep) && resolved !== normalizedBase) {
+    throw new Error(
+      `[init.mjs] Security: Path access denied outside script directory: ${targetPath}`
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Restricted fs operations - only within script directory
+ */
+const fs = {
+  existsSync(targetPath) {
+    const validated = validateScriptPath(targetPath);
+    return fsNative.existsSync(validated);
+  },
+  mkdirSync(targetPath, options) {
+    const validated = validateScriptPath(targetPath);
+    return fsNative.mkdirSync(validated, options);
+  },
+  createWriteStream(targetPath) {
+    const validated = validateScriptPath(targetPath);
+    return fsNative.createWriteStream(validated);
+  },
+};
 
 // Colors for terminal output (works on modern terminals including Windows)
 const colors = {

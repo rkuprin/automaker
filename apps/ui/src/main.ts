@@ -3,15 +3,36 @@
  *
  * This version spawns the backend server and uses HTTP API for most operations.
  * Only native features (dialogs, shell) use IPC.
+ *
+ * SECURITY: All file system access uses centralized methods from @automaker/platform.
  */
 
 import path from 'path';
 import { spawn, execSync, ChildProcess } from 'child_process';
-import fs from 'fs';
 import crypto from 'crypto';
 import http, { Server } from 'http';
 import { app, BrowserWindow, ipcMain, dialog, shell, screen } from 'electron';
-import { findNodeExecutable, buildEnhancedPath } from '@automaker/platform';
+import {
+  findNodeExecutable,
+  buildEnhancedPath,
+  initAllowedPaths,
+  isPathAllowed,
+  getAllowedRootDirectory,
+  // Electron userData operations
+  setElectronUserDataPath,
+  electronUserDataReadFileSync,
+  electronUserDataWriteFileSync,
+  electronUserDataExists,
+  // Electron app bundle operations
+  setElectronAppPaths,
+  electronAppExists,
+  electronAppReadFileSync,
+  electronAppStatSync,
+  electronAppStat,
+  electronAppReadFile,
+  // System path operations
+  systemPathExists,
+} from '@automaker/platform';
 
 // Development environment
 const isDev = !app.isPackaged;
@@ -64,21 +85,19 @@ let saveWindowBoundsTimeout: ReturnType<typeof setTimeout> | null = null;
 let apiKey: string | null = null;
 
 /**
- * Get path to API key file in user data directory
+ * Get the relative path to API key file within userData
  */
-function getApiKeyPath(): string {
-  return path.join(app.getPath('userData'), '.api-key');
-}
+const API_KEY_FILENAME = '.api-key';
 
 /**
  * Ensure an API key exists - load from file or generate new one.
  * This key is passed to the server for CSRF protection.
+ * Uses centralized electronUserData methods for path validation.
  */
 function ensureApiKey(): string {
-  const keyPath = getApiKeyPath();
   try {
-    if (fs.existsSync(keyPath)) {
-      const key = fs.readFileSync(keyPath, 'utf-8').trim();
+    if (electronUserDataExists(API_KEY_FILENAME)) {
+      const key = electronUserDataReadFileSync(API_KEY_FILENAME).trim();
       if (key) {
         apiKey = key;
         console.log('[Electron] Loaded existing API key');
@@ -92,7 +111,7 @@ function ensureApiKey(): string {
   // Generate new key
   apiKey = crypto.randomUUID();
   try {
-    fs.writeFileSync(keyPath, apiKey, { encoding: 'utf-8', mode: 0o600 });
+    electronUserDataWriteFileSync(API_KEY_FILENAME, apiKey, { encoding: 'utf-8', mode: 0o600 });
     console.log('[Electron] Generated new API key');
   } catch (error) {
     console.error('[Electron] Failed to save API key:', error);
@@ -102,6 +121,7 @@ function ensureApiKey(): string {
 
 /**
  * Get icon path - works in both dev and production, cross-platform
+ * Uses centralized electronApp methods for path validation.
  */
 function getIconPath(): string | null {
   let iconFile: string;
@@ -117,8 +137,13 @@ function getIconPath(): string | null {
     ? path.join(__dirname, '../public', iconFile)
     : path.join(__dirname, '../dist/public', iconFile);
 
-  if (!fs.existsSync(iconPath)) {
-    console.warn(`[Electron] Icon not found at: ${iconPath}`);
+  try {
+    if (!electronAppExists(iconPath)) {
+      console.warn(`[Electron] Icon not found at: ${iconPath}`);
+      return null;
+    }
+  } catch (error) {
+    console.warn(`[Electron] Icon check failed: ${iconPath}`, error);
     return null;
   }
 
@@ -126,20 +151,18 @@ function getIconPath(): string | null {
 }
 
 /**
- * Get path to window bounds settings file
+ * Relative path to window bounds settings file within userData
  */
-function getWindowBoundsPath(): string {
-  return path.join(app.getPath('userData'), 'window-bounds.json');
-}
+const WINDOW_BOUNDS_FILENAME = 'window-bounds.json';
 
 /**
  * Load saved window bounds from disk
+ * Uses centralized electronUserData methods for path validation.
  */
 function loadWindowBounds(): WindowBounds | null {
   try {
-    const boundsPath = getWindowBoundsPath();
-    if (fs.existsSync(boundsPath)) {
-      const data = fs.readFileSync(boundsPath, 'utf-8');
+    if (electronUserDataExists(WINDOW_BOUNDS_FILENAME)) {
+      const data = electronUserDataReadFileSync(WINDOW_BOUNDS_FILENAME);
       const bounds = JSON.parse(data) as WindowBounds;
       // Validate the loaded data has required fields
       if (
@@ -159,11 +182,11 @@ function loadWindowBounds(): WindowBounds | null {
 
 /**
  * Save window bounds to disk
+ * Uses centralized electronUserData methods for path validation.
  */
 function saveWindowBounds(bounds: WindowBounds): void {
   try {
-    const boundsPath = getWindowBoundsPath();
-    fs.writeFileSync(boundsPath, JSON.stringify(bounds, null, 2), 'utf-8');
+    electronUserDataWriteFileSync(WINDOW_BOUNDS_FILENAME, JSON.stringify(bounds, null, 2));
     console.log('[Electron] Window bounds saved');
   } catch (error) {
     console.warn('[Electron] Failed to save window bounds:', (error as Error).message);
@@ -241,6 +264,7 @@ function validateBounds(bounds: WindowBounds): WindowBounds {
 
 /**
  * Start static file server for production builds
+ * Uses centralized electronApp methods for serving static files from app bundle.
  */
 async function startStaticServer(): Promise<void> {
   const staticPath = path.join(__dirname, '../dist');
@@ -253,20 +277,24 @@ async function startStaticServer(): Promise<void> {
     } else if (!path.extname(filePath)) {
       // For client-side routing, serve index.html for paths without extensions
       const possibleFile = filePath + '.html';
-      if (!fs.existsSync(filePath) && !fs.existsSync(possibleFile)) {
+      try {
+        if (!electronAppExists(filePath) && !electronAppExists(possibleFile)) {
+          filePath = path.join(staticPath, 'index.html');
+        } else if (electronAppExists(possibleFile)) {
+          filePath = possibleFile;
+        }
+      } catch {
         filePath = path.join(staticPath, 'index.html');
-      } else if (fs.existsSync(possibleFile)) {
-        filePath = possibleFile;
       }
     }
 
-    fs.stat(filePath, (err, stats) => {
+    electronAppStat(filePath, (err, stats) => {
       if (err || !stats?.isFile()) {
         filePath = path.join(staticPath, 'index.html');
       }
 
-      fs.readFile(filePath, (error, content) => {
-        if (error) {
+      electronAppReadFile(filePath, (error, content) => {
+        if (error || !content) {
           response.writeHead(500);
           response.end('Server Error');
           return;
@@ -308,6 +336,7 @@ async function startStaticServer(): Promise<void> {
 
 /**
  * Start the backend server
+ * Uses centralized methods for path validation.
  */
 async function startServer(): Promise<void> {
   // Find Node.js executable (handles desktop launcher scenarios)
@@ -318,8 +347,20 @@ async function startServer(): Promise<void> {
   const command = nodeResult.nodePath;
 
   // Validate that the found Node executable actually exists
-  if (command !== 'node' && !fs.existsSync(command)) {
-    throw new Error(`Node.js executable not found at: ${command} (source: ${nodeResult.source})`);
+  // systemPathExists is used because node-finder returns system paths
+  if (command !== 'node') {
+    let exists: boolean;
+    try {
+      exists = systemPathExists(command);
+    } catch (error) {
+      const originalError = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to verify Node.js executable at: ${command} (source: ${nodeResult.source}). Reason: ${originalError}`
+      );
+    }
+    if (!exists) {
+      throw new Error(`Node.js executable not found at: ${command} (source: ${nodeResult.source})`);
+    }
   }
 
   let args: string[];
@@ -332,11 +373,22 @@ async function startServer(): Promise<void> {
     const rootNodeModules = path.join(__dirname, '../../../node_modules/tsx');
 
     let tsxCliPath: string;
-    if (fs.existsSync(path.join(serverNodeModules, 'dist/cli.mjs'))) {
-      tsxCliPath = path.join(serverNodeModules, 'dist/cli.mjs');
-    } else if (fs.existsSync(path.join(rootNodeModules, 'dist/cli.mjs'))) {
-      tsxCliPath = path.join(rootNodeModules, 'dist/cli.mjs');
-    } else {
+    // Check for tsx in app bundle paths
+    try {
+      if (electronAppExists(path.join(serverNodeModules, 'dist/cli.mjs'))) {
+        tsxCliPath = path.join(serverNodeModules, 'dist/cli.mjs');
+      } else if (electronAppExists(path.join(rootNodeModules, 'dist/cli.mjs'))) {
+        tsxCliPath = path.join(rootNodeModules, 'dist/cli.mjs');
+      } else {
+        try {
+          tsxCliPath = require.resolve('tsx/cli.mjs', {
+            paths: [path.join(__dirname, '../../server')],
+          });
+        } catch {
+          throw new Error("Could not find tsx. Please run 'npm install' in the server directory.");
+        }
+      }
+    } catch {
       try {
         tsxCliPath = require.resolve('tsx/cli.mjs', {
           paths: [path.join(__dirname, '../../server')],
@@ -351,7 +403,11 @@ async function startServer(): Promise<void> {
     serverPath = path.join(process.resourcesPath, 'server', 'index.js');
     args = [serverPath];
 
-    if (!fs.existsSync(serverPath)) {
+    try {
+      if (!electronAppExists(serverPath)) {
+        throw new Error(`Server not found at: ${serverPath}`);
+      }
+    } catch {
       throw new Error(`Server not found at: ${serverPath}`);
     }
   }
@@ -359,6 +415,13 @@ async function startServer(): Promise<void> {
   const serverNodeModules = app.isPackaged
     ? path.join(process.resourcesPath, 'server', 'node_modules')
     : path.join(__dirname, '../../server/node_modules');
+
+  // Server root directory - where .env file is located
+  // In dev: apps/server (not apps/server/src)
+  // In production: resources/server
+  const serverRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'server')
+    : path.join(__dirname, '../../server');
 
   // Build enhanced PATH that includes Node.js directory (cross-platform)
   const enhancedPath = buildEnhancedPath(command, process.env.PATH || '');
@@ -383,10 +446,11 @@ async function startServer(): Promise<void> {
 
   console.log('[Electron] Starting backend server...');
   console.log('[Electron] Server path:', serverPath);
+  console.log('[Electron] Server root (cwd):', serverRoot);
   console.log('[Electron] NODE_PATH:', serverNodeModules);
 
   serverProcess = spawn(command, args, {
-    cwd: path.dirname(serverPath),
+    cwd: serverRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -541,6 +605,28 @@ app.whenReady().then(async () => {
     console.warn('[Electron] Failed to set userData path:', (error as Error).message);
   }
 
+  // Initialize centralized path helpers for Electron
+  // This must be done before any file operations
+  setElectronUserDataPath(app.getPath('userData'));
+
+  // In development mode, allow access to the entire project root (for source files, node_modules, etc.)
+  // In production, only allow access to the built app directory and resources
+  if (isDev) {
+    // __dirname is apps/ui/dist-electron, so go up 3 levels to get project root
+    const projectRoot = path.join(__dirname, '../../..');
+    setElectronAppPaths([__dirname, projectRoot]);
+  } else {
+    setElectronAppPaths(__dirname, process.resourcesPath);
+  }
+  console.log('[Electron] Initialized path security helpers');
+
+  // Initialize security settings for path validation
+  // Set DATA_DIR before initializing so it's available for security checks
+  process.env.DATA_DIR = app.getPath('userData');
+  // ALLOWED_ROOT_DIRECTORY should already be in process.env if set by user
+  // (it will be passed to server process, but we also need it in main process for dialog validation)
+  initAllowedPaths();
+
   if (process.platform === 'darwin' && app.dock) {
     const iconPath = getIconPath();
     if (iconPath) {
@@ -631,6 +717,22 @@ ipcMain.handle('dialog:openDirectory', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
   });
+
+  // Validate selected path against ALLOWED_ROOT_DIRECTORY if configured
+  if (!result.canceled && result.filePaths.length > 0) {
+    const selectedPath = result.filePaths[0];
+    if (!isPathAllowed(selectedPath)) {
+      const allowedRoot = getAllowedRootDirectory();
+      const errorMessage = allowedRoot
+        ? `The selected directory is not allowed. Please select a directory within: ${allowedRoot}`
+        : 'The selected directory is not allowed.';
+
+      await dialog.showErrorBox('Directory Not Allowed', errorMessage);
+
+      return { canceled: true, filePaths: [] };
+    }
+  }
+
   return result;
 });
 
@@ -735,4 +837,10 @@ ipcMain.handle('window:updateMinWidth', (_, _sidebarExpanded: boolean) => {
 
   // Always use the smaller minimum width - horizontal scrolling handles any overflow
   mainWindow.setMinimumSize(MIN_WIDTH_COLLAPSED, MIN_HEIGHT);
+});
+
+// Quit the application (used when user denies sandbox risk confirmation)
+ipcMain.handle('app:quit', () => {
+  console.log('[Electron] Quitting application via IPC request');
+  app.quit();
 });
