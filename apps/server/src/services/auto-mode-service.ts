@@ -695,10 +695,14 @@ export class AutoModeService {
   ): Promise<void> {
     console.log(`[AutoMode] Executing ${steps.length} pipeline step(s) for feature ${featureId}`);
 
-    // Load context files once
+    // Load context files once with feature context for smart memory selection
     const contextResult = await loadContextFiles({
       projectPath,
       fsModule: secureFs as Parameters<typeof loadContextFiles>[0]['fsModule'],
+      taskContext: {
+        title: feature.title ?? '',
+        description: feature.description ?? '',
+      },
     });
     const contextFilesPrompt = filterClaudeMdFromContext(contextResult, autoLoadClaudeMd);
 
@@ -930,6 +934,10 @@ Complete the pipeline step instructions above. Review the previous work and appl
     const contextResult = await loadContextFiles({
       projectPath,
       fsModule: secureFs as Parameters<typeof loadContextFiles>[0]['fsModule'],
+      taskContext: {
+        title: feature?.title ?? prompt.substring(0, 200),
+        description: feature?.description ?? prompt,
+      },
     });
 
     // When autoLoadClaudeMd is enabled, filter out CLAUDE.md to avoid duplication
@@ -2832,13 +2840,12 @@ ${truncatedOutput}`;
     try {
       // Import query dynamically to avoid circular dependencies
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
-      const { CLAUDE_MODEL_MAP } = await import('@automaker/model-resolver');
 
-      // Use a quick model for extraction
+      // Use a quick model for extraction (resolveModelString is already imported at top)
       const stream = query({
         prompt: userPrompt,
         options: {
-          model: CLAUDE_MODEL_MAP.haiku,
+          model: resolveModelString('haiku'),
           maxTurns: 1,
           allowedTools: [],
           permissionMode: 'acceptEdits',
@@ -2859,26 +2866,85 @@ ${truncatedOutput}`;
         }
       }
 
-      // Parse the response
-      const jsonMatch = responseText.match(/\{[\s\S]*"learnings"[\s\S]*\}/);
-      if (!jsonMatch) return;
+      // Parse the response - handle JSON in markdown code blocks or raw
+      let jsonStr: string | null = null;
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      // First try to find JSON in markdown code blocks
+      const codeBlockMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1];
+      } else {
+        // Fall back to finding balanced braces containing "learnings"
+        // Use a more precise approach: find the opening brace before "learnings"
+        const learningsIndex = responseText.indexOf('"learnings"');
+        if (learningsIndex !== -1) {
+          // Find the opening brace before "learnings"
+          let braceStart = responseText.lastIndexOf('{', learningsIndex);
+          if (braceStart !== -1) {
+            // Find matching closing brace
+            let braceCount = 0;
+            let braceEnd = -1;
+            for (let i = braceStart; i < responseText.length; i++) {
+              if (responseText[i] === '{') braceCount++;
+              if (responseText[i] === '}') braceCount--;
+              if (braceCount === 0) {
+                braceEnd = i;
+                break;
+              }
+            }
+            if (braceEnd !== -1) {
+              jsonStr = responseText.substring(braceStart, braceEnd + 1);
+            }
+          }
+        }
+      }
+
+      if (!jsonStr) return;
+
+      let parsed: { learnings?: unknown[] };
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        console.warn('[AutoMode] Failed to parse learnings JSON:', jsonStr.substring(0, 200));
+        return;
+      }
+
       if (!parsed.learnings || !Array.isArray(parsed.learnings)) return;
 
+      // Valid learning types
+      const validTypes = new Set(['decision', 'learning', 'pattern', 'gotcha']);
+
       // Record each learning
-      for (const learning of parsed.learnings) {
-        if (!learning.category || !learning.content) continue;
+      for (const item of parsed.learnings) {
+        // Validate required fields with proper type narrowing
+        if (!item || typeof item !== 'object') continue;
+
+        const learning = item as Record<string, unknown>;
+        if (
+          !learning.category ||
+          typeof learning.category !== 'string' ||
+          !learning.content ||
+          typeof learning.content !== 'string' ||
+          !learning.content.trim()
+        ) {
+          continue;
+        }
+
+        // Validate and normalize type
+        const typeStr = typeof learning.type === 'string' ? learning.type : 'learning';
+        const learningType = validTypes.has(typeStr)
+          ? (typeStr as 'decision' | 'learning' | 'pattern' | 'gotcha')
+          : 'learning';
 
         await appendLearning(
           projectPath,
           {
             category: learning.category,
-            type: learning.type || 'learning',
-            content: learning.content,
-            why: learning.why,
-            rejected: learning.rejected,
-            breaking: learning.breaking,
+            type: learningType,
+            content: learning.content.trim(),
+            why: typeof learning.why === 'string' ? learning.why : undefined,
+            rejected: typeof learning.rejected === 'string' ? learning.rejected : undefined,
+            breaking: typeof learning.breaking === 'string' ? learning.breaking : undefined,
           },
           secureFs as Parameters<typeof appendLearning>[2]
         );
@@ -2890,7 +2956,7 @@ ${truncatedOutput}`;
         );
       }
     } catch (error) {
-      console.warn('[AutoMode] Failed to extract learnings:', error);
+      console.warn(`[AutoMode] Failed to extract learnings from feature ${feature.id}:`, error);
     }
   }
 }

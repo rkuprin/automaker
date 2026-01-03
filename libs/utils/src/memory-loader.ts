@@ -74,20 +74,53 @@ export interface LearningEntry {
 }
 
 /**
- * Default metadata for new memory files
+ * Create default metadata for new memory files
+ * Returns a new object each time to avoid shared mutable state
  */
-const DEFAULT_METADATA: MemoryMetadata = {
-  tags: [],
-  summary: '',
-  relevantTo: [],
-  importance: 0.5,
-  relatedFiles: [],
-  usageStats: {
-    loaded: 0,
-    referenced: 0,
-    successfulFeatures: 0,
-  },
-};
+function createDefaultMetadata(): MemoryMetadata {
+  return {
+    tags: [],
+    summary: '',
+    relevantTo: [],
+    importance: 0.5,
+    relatedFiles: [],
+    usageStats: {
+      loaded: 0,
+      referenced: 0,
+      successfulFeatures: 0,
+    },
+  };
+}
+
+/**
+ * In-memory locks to prevent race conditions when updating files
+ */
+const fileLocks = new Map<string, Promise<void>>();
+
+/**
+ * Acquire a lock for a file path, execute the operation, then release
+ */
+async function withFileLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  // Wait for any existing lock on this file
+  const existingLock = fileLocks.get(filePath);
+  if (existingLock) {
+    await existingLock;
+  }
+
+  // Create a new lock
+  let releaseLock: () => void;
+  const lockPromise = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  fileLocks.set(filePath, lockPromise);
+
+  try {
+    return await operation();
+  } finally {
+    releaseLock!();
+    fileLocks.delete(filePath);
+  }
+}
 
 /**
  * Get the memory directory path for a project
@@ -104,11 +137,12 @@ export function parseFrontmatter(content: string): {
   metadata: MemoryMetadata;
   body: string;
 } {
-  const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
+  // Handle both Unix (\n) and Windows (\r\n) line endings
+  const frontmatterRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n/;
   const match = content.match(frontmatterRegex);
 
   if (!match) {
-    return { metadata: { ...DEFAULT_METADATA }, body: content };
+    return { metadata: createDefaultMetadata(), body: content };
   }
 
   const frontmatterStr = match[1];
@@ -116,12 +150,15 @@ export function parseFrontmatter(content: string): {
 
   try {
     // Simple YAML parsing for our specific format
-    const metadata: MemoryMetadata = { ...DEFAULT_METADATA };
+    const metadata: MemoryMetadata = createDefaultMetadata();
 
     // Parse tags: [tag1, tag2, tag3]
     const tagsMatch = frontmatterStr.match(/tags:\s*\[(.*?)\]/);
     if (tagsMatch) {
-      metadata.tags = tagsMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
+      metadata.tags = tagsMatch[1]
+        .split(',')
+        .map((t) => t.trim().replace(/['"]/g, ''))
+        .filter((t) => t.length > 0); // Filter out empty strings
     }
 
     // Parse summary
@@ -133,19 +170,26 @@ export function parseFrontmatter(content: string): {
     // Parse relevantTo: [term1, term2]
     const relevantMatch = frontmatterStr.match(/relevantTo:\s*\[(.*?)\]/);
     if (relevantMatch) {
-      metadata.relevantTo = relevantMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
+      metadata.relevantTo = relevantMatch[1]
+        .split(',')
+        .map((t) => t.trim().replace(/['"]/g, ''))
+        .filter((t) => t.length > 0); // Filter out empty strings
     }
 
-    // Parse importance
+    // Parse importance (validate range 0-1)
     const importanceMatch = frontmatterStr.match(/importance:\s*([\d.]+)/);
     if (importanceMatch) {
-      metadata.importance = parseFloat(importanceMatch[1]);
+      const value = parseFloat(importanceMatch[1]);
+      metadata.importance = Math.max(0, Math.min(1, value)); // Clamp to 0-1
     }
 
     // Parse relatedFiles: [file1.md, file2.md]
     const relatedMatch = frontmatterStr.match(/relatedFiles:\s*\[(.*?)\]/);
     if (relatedMatch) {
-      metadata.relatedFiles = relatedMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
+      metadata.relatedFiles = relatedMatch[1]
+        .split(',')
+        .map((t) => t.trim().replace(/['"]/g, ''))
+        .filter((t) => t.length > 0); // Filter out empty strings
     }
 
     // Parse usageStats
@@ -159,26 +203,43 @@ export function parseFrontmatter(content: string): {
 
     return { metadata, body };
   } catch {
-    return { metadata: { ...DEFAULT_METADATA }, body: content };
+    return { metadata: createDefaultMetadata(), body: content };
   }
+}
+
+/**
+ * Escape a string for safe YAML output
+ * Quotes strings containing special characters
+ */
+function escapeYamlString(str: string): string {
+  // If string contains special YAML characters, wrap in quotes
+  if (/[:\[\]{}#&*!|>'"%@`\n\r]/.test(str) || str.trim() !== str) {
+    // Escape any existing quotes and wrap in double quotes
+    return `"${str.replace(/"/g, '\\"')}"`;
+  }
+  return str;
 }
 
 /**
  * Serialize metadata back to YAML frontmatter
  */
 export function serializeFrontmatter(metadata: MemoryMetadata): string {
+  const escapedTags = metadata.tags.map(escapeYamlString);
+  const escapedRelevantTo = metadata.relevantTo.map(escapeYamlString);
+  const escapedRelatedFiles = metadata.relatedFiles.map(escapeYamlString);
+  const escapedSummary = escapeYamlString(metadata.summary);
+
   return `---
-tags: [${metadata.tags.join(', ')}]
-summary: ${metadata.summary}
-relevantTo: [${metadata.relevantTo.join(', ')}]
+tags: [${escapedTags.join(', ')}]
+summary: ${escapedSummary}
+relevantTo: [${escapedRelevantTo.join(', ')}]
 importance: ${metadata.importance}
-relatedFiles: [${metadata.relatedFiles.join(', ')}]
+relatedFiles: [${escapedRelatedFiles.join(', ')}]
 usageStats:
   loaded: ${metadata.usageStats.loaded}
   referenced: ${metadata.usageStats.referenced}
   successfulFeatures: ${metadata.usageStats.successfulFeatures}
----
-`;
+---`;
 }
 
 /**
@@ -250,9 +311,9 @@ export function extractTerms(text: string): string[] {
 }
 
 /**
- * Count how many terms match between two arrays
+ * Count how many terms match between two arrays (case-insensitive)
  */
-function countMatches(arr1: string[], arr2: string[]): number {
+export function countMatches(arr1: string[], arr2: string[]): number {
   const set2 = new Set(arr2.map((t) => t.toLowerCase()));
   return arr1.filter((t) => set2.has(t.toLowerCase())).length;
 }
@@ -395,23 +456,27 @@ ${sections.join('\n\n---\n\n')}
 
 /**
  * Increment a usage stat in a memory file
+ * Uses file locking to prevent race conditions from concurrent updates
  */
 export async function incrementUsageStat(
   filePath: string,
   stat: keyof UsageStats,
   fsModule: MemoryFsModule
 ): Promise<void> {
-  try {
-    const content = (await fsModule.readFile(filePath, 'utf-8')) as string;
-    const { metadata, body } = parseFrontmatter(content);
+  await withFileLock(filePath, async () => {
+    try {
+      const content = (await fsModule.readFile(filePath, 'utf-8')) as string;
+      const { metadata, body } = parseFrontmatter(content);
 
-    metadata.usageStats[stat]++;
+      metadata.usageStats[stat]++;
 
-    const newContent = serializeFrontmatter(metadata) + '\n' + body;
-    await fsModule.writeFile(filePath, newContent);
-  } catch {
-    // File doesn't exist or can't be updated - that's fine
-  }
+      // serializeFrontmatter ends with "---", add newline before body
+      const newContent = serializeFrontmatter(metadata) + '\n' + body;
+      await fsModule.writeFile(filePath, newContent);
+    } catch {
+      // File doesn't exist or can't be updated - that's fine
+    }
+  });
 }
 
 /**
@@ -481,6 +546,7 @@ export function formatLearning(learning: LearningEntry): string {
 /**
  * Append a learning to the appropriate category file
  * Creates the file with frontmatter if it doesn't exist
+ * Uses file locking to prevent TOCTOU race conditions
  */
 export async function appendLearning(
   projectPath: string,
@@ -488,30 +554,39 @@ export async function appendLearning(
   fsModule: MemoryFsModule
 ): Promise<void> {
   const memoryDir = getMemoryDir(projectPath);
-  const fileName = `${learning.category.toLowerCase().replace(/\s+/g, '-')}.md`;
+  // Sanitize category name: lowercase, replace spaces with hyphens, remove special chars
+  const sanitizedCategory = learning.category
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+  const fileName = `${sanitizedCategory || 'general'}.md`;
   const filePath = path.join(memoryDir, fileName);
 
-  try {
-    await fsModule.access(filePath);
-    // File exists, append to it
-    const formatted = formatLearning(learning);
-    await fsModule.appendFile(filePath, '\n' + formatted);
-  } catch {
-    // File doesn't exist, create it with frontmatter
-    const metadata: MemoryMetadata = {
-      tags: [learning.category.toLowerCase()],
-      summary: `${learning.category} implementation decisions and patterns`,
-      relevantTo: [learning.category.toLowerCase()],
-      importance: 0.7,
-      relatedFiles: [],
-      usageStats: { loaded: 0, referenced: 0, successfulFeatures: 0 },
-    };
+  // Use file locking to prevent race conditions when multiple processes
+  // try to create the same file simultaneously
+  await withFileLock(filePath, async () => {
+    try {
+      await fsModule.access(filePath);
+      // File exists, append to it
+      const formatted = formatLearning(learning);
+      await fsModule.appendFile(filePath, '\n' + formatted);
+    } catch {
+      // File doesn't exist, create it with frontmatter
+      const metadata: MemoryMetadata = {
+        tags: [sanitizedCategory || 'general'],
+        summary: `${learning.category} implementation decisions and patterns`,
+        relevantTo: [sanitizedCategory || 'general'],
+        importance: 0.7,
+        relatedFiles: [],
+        usageStats: { loaded: 0, referenced: 0, successfulFeatures: 0 },
+      };
 
-    const content =
-      serializeFrontmatter(metadata) + `\n# ${learning.category}\n` + formatLearning(learning);
+      const content =
+        serializeFrontmatter(metadata) + `\n# ${learning.category}\n` + formatLearning(learning);
 
-    await fsModule.writeFile(filePath, content);
-  }
+      await fsModule.writeFile(filePath, content);
+    }
+  });
 }
 
 /**

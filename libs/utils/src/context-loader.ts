@@ -21,6 +21,8 @@ import {
   initializeMemoryFolder,
   extractTerms,
   calculateUsageScore,
+  countMatches,
+  incrementUsageStat,
   type MemoryFsModule,
   type MemoryMetadata,
 } from './memory-loader.js';
@@ -65,11 +67,16 @@ export interface ContextFilesResult {
 /**
  * File system module interface for context loading
  * Compatible with secureFs from @automaker/platform
+ * Includes write methods needed for memory initialization
  */
 export interface ContextFsModule {
   access: (path: string) => Promise<void>;
   readdir: (path: string) => Promise<string[]>;
   readFile: (path: string, encoding?: BufferEncoding) => Promise<string | Buffer>;
+  // Write methods needed for memory operations
+  writeFile: (path: string, content: string) => Promise<void>;
+  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<string | undefined>;
+  appendFile: (path: string, content: string) => Promise<void>;
 }
 
 /**
@@ -268,10 +275,10 @@ export async function loadContextFiles(
       await fsModule.access(memoryDir);
       const allMemoryFiles = await fsModule.readdir(memoryDir);
 
-      // Filter for markdown memory files (except _index.md)
+      // Filter for markdown memory files (except _index.md, case-insensitive)
       const memoryMdFiles = allMemoryFiles.filter((f) => {
         const lower = f.toLowerCase();
-        return lower.endsWith('.md') && f !== '_index.md';
+        return lower.endsWith('.md') && lower !== '_index.md';
       });
 
       // Extract terms from task context for matching
@@ -302,11 +309,17 @@ export async function loadContextFiles(
 
           if (taskTerms.length > 0) {
             // Match task terms against file metadata
-            const tagScore = countTermMatches(metadata.tags, taskTerms) * 3;
-            const relevantToScore = countTermMatches(metadata.relevantTo, taskTerms) * 2;
+            const tagScore = countMatches(metadata.tags, taskTerms) * 3;
+            const relevantToScore = countMatches(metadata.relevantTo, taskTerms) * 2;
             const summaryTerms = extractTerms(metadata.summary);
-            const summaryScore = countTermMatches(summaryTerms, taskTerms);
-            const categoryScore = countTermMatches([fileName.replace('.md', '')], taskTerms) * 4;
+            const summaryScore = countMatches(summaryTerms, taskTerms);
+            // Split category name on hyphens/underscores for better matching
+            // e.g., "authentication-decisions" matches "authentication"
+            const categoryTerms = fileName
+              .replace('.md', '')
+              .split(/[-_]/)
+              .filter((t) => t.length > 2);
+            const categoryScore = countMatches(categoryTerms, taskTerms) * 4;
 
             // Usage-based scoring (files that helped before rank higher)
             const usageScore = calculateUsageScore(metadata.usageStats);
@@ -330,34 +343,37 @@ export async function loadContextFiles(
       scoredFiles.sort((a, b) => b.score - a.score);
 
       // Select files to load:
-      // 1. Always include gotchas.md if it exists
+      // 1. Always include gotchas.md if it exists (unless maxMemoryFiles=0)
       // 2. Include high-importance files (importance >= 0.9)
       // 3. Include top scoring files up to maxMemoryFiles
       const selectedFiles = new Set<string>();
 
-      // Always include gotchas.md
-      const gotchasFile = scoredFiles.find((f) => f.fileName === 'gotchas.md');
-      if (gotchasFile) {
-        selectedFiles.add('gotchas.md');
-      }
-
-      // Add high-importance files
-      for (const file of scoredFiles) {
-        if (file.metadata.importance >= 0.9 && selectedFiles.size < maxMemoryFiles) {
-          selectedFiles.add(file.fileName);
+      // Skip selection if maxMemoryFiles is 0
+      if (maxMemoryFiles > 0) {
+        // Always include gotchas.md
+        const gotchasFile = scoredFiles.find((f) => f.fileName === 'gotchas.md');
+        if (gotchasFile) {
+          selectedFiles.add('gotchas.md');
         }
-      }
 
-      // Add top scoring files (if we have task context and room)
-      if (taskTerms.length > 0) {
+        // Add high-importance files
         for (const file of scoredFiles) {
-          if (file.score > 0 && selectedFiles.size < maxMemoryFiles) {
+          if (file.metadata.importance >= 0.9 && selectedFiles.size < maxMemoryFiles) {
             selectedFiles.add(file.fileName);
+          }
+        }
+
+        // Add top scoring files (if we have task context and room)
+        if (taskTerms.length > 0) {
+          for (const file of scoredFiles) {
+            if (file.score > 0 && selectedFiles.size < maxMemoryFiles) {
+              selectedFiles.add(file.fileName);
+            }
           }
         }
       }
 
-      // Load selected files
+      // Load selected files and increment loaded stat
       for (const file of scoredFiles) {
         if (selectedFiles.has(file.fileName)) {
           memoryFiles.push({
@@ -366,6 +382,14 @@ export async function loadContextFiles(
             content: file.body,
             category: file.fileName.replace('.md', ''),
           });
+
+          // Increment the 'loaded' stat for this file (CRITICAL FIX)
+          // This makes calculateUsageScore work correctly
+          try {
+            await incrementUsageStat(file.filePath, 'loaded', fsModule as MemoryFsModule);
+          } catch {
+            // Non-critical - continue even if stat update fails
+          }
         }
       }
 
@@ -395,14 +419,6 @@ export async function loadContextFiles(
   }
 
   return { files, memoryFiles, formattedPrompt };
-}
-
-/**
- * Count how many terms from arr1 appear in arr2 (case-insensitive)
- */
-function countTermMatches(arr1: string[], arr2: string[]): number {
-  const set2 = new Set(arr2.map((t) => t.toLowerCase()));
-  return arr1.filter((t) => set2.has(t.toLowerCase())).length;
 }
 
 /**
