@@ -57,6 +57,7 @@ export {
   type ContextFilesResult,
   type LoadContextFilesOptions,
   type MemoryFileInfo,
+  type TaskContext,
 } from './context-loader.js';
 
 // Memory loading

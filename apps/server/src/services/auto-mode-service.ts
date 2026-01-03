@@ -509,10 +509,14 @@ export class AutoModeService {
       // Build the prompt - use continuation prompt if provided (for recovery after plan approval)
       let prompt: string;
       // Load project context files (CLAUDE.md, CODE_QUALITY.md, etc.) and memory files
-      // Context loader now automatically includes memory from .automaker/memory/
+      // Context loader uses task context to select relevant memory files
       const contextResult = await loadContextFiles({
         projectPath,
         fsModule: secureFs as Parameters<typeof loadContextFiles>[0]['fsModule'],
+        taskContext: {
+          title: feature.title ?? '',
+          description: feature.description ?? '',
+        },
       });
 
       // When autoLoadClaudeMd is enabled, filter out CLAUDE.md to avoid duplication

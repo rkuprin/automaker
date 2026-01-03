@@ -19,7 +19,10 @@ import {
   getMemoryDir,
   parseFrontmatter,
   initializeMemoryFolder,
+  extractTerms,
+  calculateUsageScore,
   type MemoryFsModule,
+  type MemoryMetadata,
 } from './memory-loader.js';
 
 /**
@@ -70,6 +73,16 @@ export interface ContextFsModule {
 }
 
 /**
+ * Task context for smart memory selection
+ */
+export interface TaskContext {
+  /** Title or name of the current task/feature */
+  title: string;
+  /** Description of what the task involves */
+  description?: string;
+}
+
+/**
  * Options for loading context files
  */
 export interface LoadContextFilesOptions {
@@ -81,6 +94,10 @@ export interface LoadContextFilesOptions {
   includeMemory?: boolean;
   /** Whether to initialize memory folder if it doesn't exist (default: true) */
   initializeMemory?: boolean;
+  /** Task context for smart memory selection - if not provided, only loads high-importance files */
+  taskContext?: TaskContext;
+  /** Maximum number of memory files to load (default: 5) */
+  maxMemoryFiles?: number;
 }
 
 /**
@@ -188,6 +205,8 @@ export async function loadContextFiles(
     fsModule = secureFs,
     includeMemory = true,
     initializeMemory = true,
+    taskContext,
+    maxMemoryFiles = 5,
   } = options;
   const contextDir = path.resolve(getContextDir(projectPath));
 
@@ -232,7 +251,7 @@ export async function loadContextFiles(
     // Context directory doesn't exist or is inaccessible - that's fine
   }
 
-  // Load memory files if enabled
+  // Load memory files if enabled (with smart selection)
   if (includeMemory) {
     const memoryDir = getMemoryDir(projectPath);
 
@@ -249,31 +268,110 @@ export async function loadContextFiles(
       await fsModule.access(memoryDir);
       const allMemoryFiles = await fsModule.readdir(memoryDir);
 
-      // Load all markdown memory files (except _index.md which is just overview)
+      // Filter for markdown memory files (except _index.md)
       const memoryMdFiles = allMemoryFiles.filter((f) => {
         const lower = f.toLowerCase();
         return lower.endsWith('.md') && f !== '_index.md';
       });
 
+      // Extract terms from task context for matching
+      const taskTerms = taskContext
+        ? extractTerms(taskContext.title + ' ' + (taskContext.description || ''))
+        : [];
+
+      // Score and load memory files
+      const scoredFiles: Array<{
+        fileName: string;
+        filePath: string;
+        body: string;
+        metadata: MemoryMetadata;
+        score: number;
+      }> = [];
+
       for (const fileName of memoryMdFiles) {
         const filePath = path.join(memoryDir, fileName);
         try {
           const rawContent = await fsModule.readFile(filePath, 'utf-8');
-          // Parse frontmatter and get just the body content
-          const { body } = parseFrontmatter(rawContent as string);
+          const { metadata, body } = parseFrontmatter(rawContent as string);
 
           // Skip empty files
           if (!body.trim()) continue;
 
-          memoryFiles.push({
-            name: fileName,
-            path: filePath,
-            content: body,
-            category: fileName.replace('.md', ''),
-          });
+          // Calculate relevance score
+          let score = 0;
+
+          if (taskTerms.length > 0) {
+            // Match task terms against file metadata
+            const tagScore = countTermMatches(metadata.tags, taskTerms) * 3;
+            const relevantToScore = countTermMatches(metadata.relevantTo, taskTerms) * 2;
+            const summaryTerms = extractTerms(metadata.summary);
+            const summaryScore = countTermMatches(summaryTerms, taskTerms);
+            const categoryScore = countTermMatches([fileName.replace('.md', '')], taskTerms) * 4;
+
+            // Usage-based scoring (files that helped before rank higher)
+            const usageScore = calculateUsageScore(metadata.usageStats);
+
+            score =
+              (tagScore + relevantToScore + summaryScore + categoryScore) *
+              metadata.importance *
+              usageScore;
+          } else {
+            // No task context - use importance as score
+            score = metadata.importance;
+          }
+
+          scoredFiles.push({ fileName, filePath, body, metadata, score });
         } catch (error) {
           console.warn(`[ContextLoader] Failed to read memory file ${fileName}:`, error);
         }
+      }
+
+      // Sort by score (highest first)
+      scoredFiles.sort((a, b) => b.score - a.score);
+
+      // Select files to load:
+      // 1. Always include gotchas.md if it exists
+      // 2. Include high-importance files (importance >= 0.9)
+      // 3. Include top scoring files up to maxMemoryFiles
+      const selectedFiles = new Set<string>();
+
+      // Always include gotchas.md
+      const gotchasFile = scoredFiles.find((f) => f.fileName === 'gotchas.md');
+      if (gotchasFile) {
+        selectedFiles.add('gotchas.md');
+      }
+
+      // Add high-importance files
+      for (const file of scoredFiles) {
+        if (file.metadata.importance >= 0.9 && selectedFiles.size < maxMemoryFiles) {
+          selectedFiles.add(file.fileName);
+        }
+      }
+
+      // Add top scoring files (if we have task context and room)
+      if (taskTerms.length > 0) {
+        for (const file of scoredFiles) {
+          if (file.score > 0 && selectedFiles.size < maxMemoryFiles) {
+            selectedFiles.add(file.fileName);
+          }
+        }
+      }
+
+      // Load selected files
+      for (const file of scoredFiles) {
+        if (selectedFiles.has(file.fileName)) {
+          memoryFiles.push({
+            name: file.fileName,
+            path: file.filePath,
+            content: file.body,
+            category: file.fileName.replace('.md', ''),
+          });
+        }
+      }
+
+      if (memoryFiles.length > 0) {
+        const selectedNames = memoryFiles.map((f) => f.category).join(', ');
+        console.log(`[ContextLoader] Selected memory files: ${selectedNames}`);
       }
     } catch {
       // Memory directory doesn't exist - that's fine
@@ -297,6 +395,14 @@ export async function loadContextFiles(
   }
 
   return { files, memoryFiles, formattedPrompt };
+}
+
+/**
+ * Count how many terms from arr1 appear in arr2 (case-insensitive)
+ */
+function countTermMatches(arr1: string[], arr2: string[]): number {
+  const set2 = new Set(arr2.map((t) => t.toLowerCase()));
+  return arr1.filter((t) => set2.has(t.toLowerCase())).length;
 }
 
 /**
