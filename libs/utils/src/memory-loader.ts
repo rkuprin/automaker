@@ -63,14 +63,17 @@ export interface MemoryLoadResult {
 
 /**
  * Learning entry to be recorded
+ * Based on Architecture Decision Record (ADR) format for rich context
  */
 export interface LearningEntry {
   category: string;
   type: 'decision' | 'learning' | 'pattern' | 'gotcha';
   content: string;
-  why?: string;
-  rejected?: string;
-  breaking?: string;
+  context?: string; // Problem being solved or situation faced
+  why?: string; // Reasoning behind the approach
+  rejected?: string; // Alternative considered and why rejected
+  tradeoffs?: string; // What became easier/harder
+  breaking?: string; // What breaks if changed/removed
 }
 
 /**
@@ -520,27 +523,37 @@ export async function recordMemoryUsage(
 
 /**
  * Format a learning entry for appending to a memory file
+ * Uses ADR-style format for rich context
  */
 export function formatLearning(learning: LearningEntry): string {
   const date = new Date().toISOString().split('T')[0];
+  const lines: string[] = [];
 
   if (learning.type === 'decision') {
-    return `
-- **${learning.content}** (${date})
-  - WHY: ${learning.why || 'Not specified'}
-  - REJECTED: ${learning.rejected || 'None'}
-  - BREAKING IF CHANGED: ${learning.breaking || 'Unknown'}
-`;
+    lines.push(`\n### ${learning.content} (${date})`);
+    if (learning.context) lines.push(`- **Context:** ${learning.context}`);
+    if (learning.why) lines.push(`- **Why:** ${learning.why}`);
+    if (learning.rejected) lines.push(`- **Rejected:** ${learning.rejected}`);
+    if (learning.tradeoffs) lines.push(`- **Trade-offs:** ${learning.tradeoffs}`);
+    if (learning.breaking) lines.push(`- **Breaking if changed:** ${learning.breaking}`);
+    return lines.join('\n');
   }
 
-  const prefix =
-    learning.type === 'pattern'
-      ? '[Pattern]'
-      : learning.type === 'gotcha'
-        ? '[Gotcha]'
-        : '[Learned]';
+  if (learning.type === 'gotcha') {
+    lines.push(`\n#### [Gotcha] ${learning.content} (${date})`);
+    if (learning.context) lines.push(`- **Situation:** ${learning.context}`);
+    if (learning.why) lines.push(`- **Root cause:** ${learning.why}`);
+    if (learning.tradeoffs) lines.push(`- **How to avoid:** ${learning.tradeoffs}`);
+    return lines.join('\n');
+  }
 
-  return `- ${prefix} ${learning.content} (${date})`;
+  // Pattern or learning
+  const prefix = learning.type === 'pattern' ? '[Pattern]' : '[Learned]';
+  lines.push(`\n#### ${prefix} ${learning.content} (${date})`);
+  if (learning.context) lines.push(`- **Problem solved:** ${learning.context}`);
+  if (learning.why) lines.push(`- **Why this works:** ${learning.why}`);
+  if (learning.tradeoffs) lines.push(`- **Trade-offs:** ${learning.tradeoffs}`);
+  return lines.join('\n');
 }
 
 /**
@@ -553,6 +566,9 @@ export async function appendLearning(
   learning: LearningEntry,
   fsModule: MemoryFsModule
 ): Promise<void> {
+  console.log(
+    `[MemoryLoader] appendLearning called: category=${learning.category}, type=${learning.type}`
+  );
   const memoryDir = getMemoryDir(projectPath);
   // Sanitize category name: lowercase, replace spaces with hyphens, remove special chars
   const sanitizedCategory = learning.category
@@ -570,8 +586,10 @@ export async function appendLearning(
       // File exists, append to it
       const formatted = formatLearning(learning);
       await fsModule.appendFile(filePath, '\n' + formatted);
+      console.log(`[MemoryLoader] Appended learning to existing file: ${fileName}`);
     } catch {
       // File doesn't exist, create it with frontmatter
+      console.log(`[MemoryLoader] Creating new memory file: ${fileName}`);
       const metadata: MemoryMetadata = {
         tags: [sanitizedCategory || 'general'],
         summary: `${learning.category} implementation decisions and patterns`,

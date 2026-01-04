@@ -2805,37 +2805,45 @@ Begin implementing task ${task.id} now.`;
   ): Promise<void> {
     if (!agentOutput || agentOutput.length < 100) {
       // Not enough output to extract learnings from
+      console.log(
+        `[AutoMode] Skipping learning extraction - output too short (${agentOutput?.length || 0} chars)`
+      );
       return;
     }
+
+    console.log(
+      `[AutoMode] Extracting learnings from feature "${feature.title}" (${agentOutput.length} chars)`
+    );
 
     // Limit output to avoid token limits
     const truncatedOutput = agentOutput.length > 10000 ? agentOutput.slice(-10000) : agentOutput;
 
-    const userPrompt = `Based on implementing "${feature.title}", identify any important learnings.
+    const userPrompt = `You are an Architecture Decision Record (ADR) extractor. Analyze this implementation and return ONLY JSON with learnings. No explanations.
 
-Look for:
-1. DECISIONS made that future developers should understand (architecture, library choices, patterns)
-2. GOTCHAS or edge cases encountered that should be avoided
-3. PATTERNS that worked well and should be reused
+Feature: "${feature.title}"
 
-For each finding, respond with JSON:
-{
-  "learnings": [
-    {
-      "category": "architecture|api|ui|terminals|auth|testing|gotchas",
-      "type": "decision|gotcha|pattern|learning",
-      "content": "Brief description",
-      "why": "For decisions: why this choice was made",
-      "rejected": "For decisions: what alternative was rejected",
-      "breaking": "For decisions: what would break if changed"
-    }
-  ]
-}
+Implementation log:
+${truncatedOutput}
 
-Only include genuinely useful, non-obvious learnings. Return {"learnings": []} if nothing notable.
+Extract MEANINGFUL learnings - not obvious things. For each, capture:
+- DECISIONS: Why this approach vs alternatives? What would break if changed?
+- GOTCHAS: What was unexpected? What's the root cause? How to avoid?
+- PATTERNS: Why this pattern? What problem does it solve? Trade-offs?
 
-Feature context:
-${truncatedOutput}`;
+JSON format ONLY (no markdown, no text):
+{"learnings": [{
+  "category": "architecture|api|ui|database|auth|testing|performance|security|gotchas",
+  "type": "decision|gotcha|pattern",
+  "content": "What was done/learned",
+  "context": "Problem being solved or situation faced",
+  "why": "Reasoning - why this approach",
+  "rejected": "Alternative considered and why rejected",
+  "tradeoffs": "What became easier/harder",
+  "breaking": "What breaks if this is changed/removed"
+}]}
+
+IMPORTANT: Only include NON-OBVIOUS learnings with real reasoning. Skip trivial patterns.
+If nothing notable: {"learnings": []}`;
 
     try {
       // Import query dynamically to avoid circular dependencies
@@ -2849,6 +2857,8 @@ ${truncatedOutput}`;
           maxTurns: 1,
           allowedTools: [],
           permissionMode: 'acceptEdits',
+          systemPrompt:
+            'You are a JSON extraction assistant. You MUST respond with ONLY valid JSON, no explanations, no markdown, no other text. Extract learnings from the provided implementation context and return them as JSON.',
         },
       });
 
@@ -2866,12 +2876,16 @@ ${truncatedOutput}`;
         }
       }
 
+      console.log(`[AutoMode] Learning extraction response: ${responseText.length} chars`);
+      console.log(`[AutoMode] Response preview: ${responseText.substring(0, 300)}`);
+
       // Parse the response - handle JSON in markdown code blocks or raw
       let jsonStr: string | null = null;
 
       // First try to find JSON in markdown code blocks
       const codeBlockMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
       if (codeBlockMatch) {
+        console.log('[AutoMode] Found JSON in code block');
         jsonStr = codeBlockMatch[1];
       } else {
         // Fall back to finding balanced braces containing "learnings"
@@ -2899,7 +2913,12 @@ ${truncatedOutput}`;
         }
       }
 
-      if (!jsonStr) return;
+      if (!jsonStr) {
+        console.log('[AutoMode] Could not extract JSON from response');
+        return;
+      }
+
+      console.log(`[AutoMode] Extracted JSON: ${jsonStr.substring(0, 200)}`);
 
       let parsed: { learnings?: unknown[] };
       try {
@@ -2909,7 +2928,12 @@ ${truncatedOutput}`;
         return;
       }
 
-      if (!parsed.learnings || !Array.isArray(parsed.learnings)) return;
+      if (!parsed.learnings || !Array.isArray(parsed.learnings)) {
+        console.log('[AutoMode] No learnings array in parsed response');
+        return;
+      }
+
+      console.log(`[AutoMode] Found ${parsed.learnings.length} potential learnings`);
 
       // Valid learning types
       const validTypes = new Set(['decision', 'learning', 'pattern', 'gotcha']);
@@ -2936,21 +2960,29 @@ ${truncatedOutput}`;
           ? (typeStr as 'decision' | 'learning' | 'pattern' | 'gotcha')
           : 'learning';
 
+        console.log(
+          `[AutoMode] Appending learning: category=${learning.category}, type=${learningType}`
+        );
         await appendLearning(
           projectPath,
           {
             category: learning.category,
             type: learningType,
             content: learning.content.trim(),
+            context: typeof learning.context === 'string' ? learning.context : undefined,
             why: typeof learning.why === 'string' ? learning.why : undefined,
             rejected: typeof learning.rejected === 'string' ? learning.rejected : undefined,
+            tradeoffs: typeof learning.tradeoffs === 'string' ? learning.tradeoffs : undefined,
             breaking: typeof learning.breaking === 'string' ? learning.breaking : undefined,
           },
           secureFs as Parameters<typeof appendLearning>[2]
         );
       }
 
-      if (parsed.learnings.length > 0) {
+      const validLearnings = parsed.learnings.filter(
+        (l) => l && typeof l === 'object' && (l as Record<string, unknown>).content
+      );
+      if (validLearnings.length > 0) {
         console.log(
           `[AutoMode] Recorded ${parsed.learnings.length} learning(s) from feature ${feature.id}`
         );
