@@ -562,23 +562,33 @@ export class HttpApiClient implements ElectronAPI {
       };
 
       this.ws.onmessage = (event) => {
+        let data: { type: EventType; payload: unknown };
         try {
-          const data = JSON.parse(event.data);
-          logger.info(
-            'WebSocket message:',
-            data.type,
-            'hasPayload:',
-            !!data.payload,
-            'callbacksRegistered:',
-            this.eventCallbacks.has(data.type)
-          );
-          const callbacks = this.eventCallbacks.get(data.type);
-          if (callbacks) {
-            logger.info('Dispatching to', callbacks.size, 'callbacks');
-            callbacks.forEach((cb) => cb(data.payload));
-          }
+          data = JSON.parse(event.data);
         } catch (error) {
           logger.error('Failed to parse WebSocket message:', error);
+          return;
+        }
+
+        logger.info(
+          'WebSocket message:',
+          data.type,
+          'hasPayload:',
+          !!data.payload,
+          'callbacksRegistered:',
+          this.eventCallbacks.has(data.type)
+        );
+
+        const callbacks = this.eventCallbacks.get(data.type);
+        if (callbacks) {
+          logger.info('Dispatching to', callbacks.size, 'callbacks for', data.type);
+          callbacks.forEach((cb) => {
+            try {
+              cb(data.payload);
+            } catch (error) {
+              logger.error('Error in WebSocket callback for event', data.type, ':', error);
+            }
+          });
         }
       };
 

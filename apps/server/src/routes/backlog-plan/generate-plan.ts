@@ -128,13 +128,20 @@ export async function generateBacklogPlan(
       '[BacklogPlan]'
     );
 
-    // For Cursor models, we need to combine prompts with explicit instructions
-    // because Cursor doesn't support systemPrompt separation like Claude SDK
-    let finalPrompt = userPrompt;
+    // Add explicit JSON instructions for ALL models to ensure valid JSON output
+    // Without these, models may output natural language explanations instead of JSON
+    const jsonInstructions = `CRITICAL: Respond with ONLY a JSON object - no explanations, no preamble.
+- Your ENTIRE response must be valid JSON starting with { and ending with }
+- No text before or after the JSON object
+- Do NOT use markdown code fences`;
+
+    let finalPrompt = `${jsonInstructions}\n\n${userPrompt}`;
     let finalSystemPrompt: string | undefined = systemPrompt;
 
+    // For Cursor models, we need to combine prompts with explicit instructions
+    // because Cursor doesn't support systemPrompt separation like Claude SDK
     if (isCursorModel(effectiveModel)) {
-      logger.info('[BacklogPlan] Using Cursor model - adding explicit no-file-write instructions');
+      logger.info('[BacklogPlan] Using Cursor model - embedding system prompt');
       finalPrompt = `${systemPrompt}
 
 CRITICAL INSTRUCTIONS:
@@ -143,6 +150,8 @@ CRITICAL INSTRUCTIONS:
 3. Respond with ONLY a JSON object - no explanations, no markdown, just raw JSON.
 4. Your entire response should be valid JSON starting with { and ending with }.
 5. No text before or after the JSON object.
+
+${jsonInstructions}
 
 ${userPrompt}`;
       finalSystemPrompt = undefined; // System prompt is now embedded in the user prompt
@@ -192,6 +201,11 @@ ${userPrompt}`;
 
     // Parse the response
     const result = parsePlanResponse(responseText);
+
+    logger.info('[BacklogPlan] Emitting backlog_plan_complete event');
+    logger.info('[BacklogPlan] Result summary:', result.summary);
+    logger.info('[BacklogPlan] Changes count:', result.changes?.length ?? 0);
+    logger.info('[BacklogPlan] Dependency updates count:', result.dependencyUpdates?.length ?? 0);
 
     events.emit('backlog-plan:event', {
       type: 'backlog_plan_complete',

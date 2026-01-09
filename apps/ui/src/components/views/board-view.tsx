@@ -703,11 +703,20 @@ export function BoardView() {
   // Listen for backlog plan events (for background generation)
   useEffect(() => {
     const api = getElectronAPI();
-    if (!api?.backlogPlan) return;
+    if (!api?.backlogPlan) {
+      logger.warn('[BacklogPlan] api.backlogPlan not available');
+      return;
+    }
 
+    logger.info('[BacklogPlan] Subscribing to backlog plan events');
     const unsubscribe = api.backlogPlan.onEvent(
       (event: { type: string; result?: BacklogPlanResult; error?: string }) => {
+        logger.info('[BacklogPlan] Received event:', event.type, 'result:', !!event.result);
         if (event.type === 'backlog_plan_complete') {
+          logger.info(
+            '[BacklogPlan] Complete event, changes count:',
+            event.result?.changes?.length ?? 0
+          );
           setIsGeneratingPlan(false);
           if (event.result && event.result.changes?.length > 0) {
             setPendingBacklogPlan(event.result);
@@ -719,16 +728,23 @@ export function BoardView() {
               },
             });
           } else {
+            logger.info('[BacklogPlan] No changes in result, showing info toast');
             toast.info('No changes generated. Try again with a different prompt.');
           }
         } else if (event.type === 'backlog_plan_error') {
+          logger.error('[BacklogPlan] Error event:', event.error);
           setIsGeneratingPlan(false);
           toast.error(`Plan generation failed: ${event.error}`);
+        } else {
+          logger.info('[BacklogPlan] Unknown event type:', event.type);
         }
       }
     );
 
-    return unsubscribe;
+    return () => {
+      logger.info('[BacklogPlan] Unsubscribing from backlog plan events');
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
