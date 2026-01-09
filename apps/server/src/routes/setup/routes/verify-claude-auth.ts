@@ -10,6 +10,33 @@ import { getApiKey } from '../common.js';
 
 const logger = createLogger('Setup');
 
+// Allowed environment variables to pass to the SDK
+// Must be passed explicitly - SDK doesn't inherit from process.env
+const ALLOWED_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'PATH',
+  'HOME',
+  'SHELL',
+  'TERM',
+  'USER',
+  'LANG',
+  'LC_ALL',
+];
+
+/**
+ * Build environment for the SDK with only explicitly allowed variables
+ */
+function buildEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const key of ALLOWED_ENV_VARS) {
+    if (process.env[key]) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
+
 // Known error patterns that indicate auth failure
 const AUTH_ERROR_PATTERNS = [
   'OAuth token revoked',
@@ -131,6 +158,7 @@ export function createVerifyClaudeAuthHandler() {
             maxTurns: 1,
             allowedTools: [],
             abortController,
+            env: buildEnv(),
           },
         });
 
