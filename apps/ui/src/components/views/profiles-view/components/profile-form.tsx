@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { HotkeyButton } from '@/components/ui/hotkey-button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +7,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { cn, modelSupportsThinking } from '@/lib/utils';
 import { DialogFooter } from '@/components/ui/dialog';
-import { Brain, Bot, Terminal } from 'lucide-react';
+import { Brain } from 'lucide-react';
+import { AnthropicIcon, CursorIcon, OpenAIIcon, OpenCodeIcon } from '@/components/ui/provider-icon';
 import { toast } from 'sonner';
 import type {
   AIProfile,
@@ -15,8 +16,16 @@ import type {
   ThinkingLevel,
   ModelProvider,
   CursorModelId,
+  CodexModelId,
+  OpencodeModelId,
 } from '@automaker/types';
-import { CURSOR_MODEL_MAP, cursorModelHasThinking } from '@automaker/types';
+import {
+  CURSOR_MODEL_MAP,
+  cursorModelHasThinking,
+  CODEX_MODEL_MAP,
+  OPENCODE_MODELS,
+  DEFAULT_OPENCODE_MODEL,
+} from '@automaker/types';
 import { useAppStore } from '@/store/app-store';
 import { CLAUDE_MODELS, THINKING_LEVELS, ICON_OPTIONS } from '../constants';
 
@@ -46,8 +55,31 @@ export function ProfileForm({
     thinkingLevel: profile.thinkingLevel || ('none' as ThinkingLevel),
     // Cursor-specific
     cursorModel: profile.cursorModel || ('auto' as CursorModelId),
+    // Codex-specific - use a valid CodexModelId from CODEX_MODEL_MAP
+    codexModel: profile.codexModel || (CODEX_MODEL_MAP.gpt52Codex as CodexModelId),
+    // OpenCode-specific
+    opencodeModel: profile.opencodeModel || (DEFAULT_OPENCODE_MODEL as OpencodeModelId),
     icon: profile.icon || 'Brain',
   });
+
+  // Sync formData with profile prop when it changes
+  useEffect(() => {
+    setFormData({
+      name: profile.name || '',
+      description: profile.description || '',
+      provider: (profile.provider || 'claude') as ModelProvider,
+      // Claude-specific
+      model: profile.model || ('sonnet' as ModelAlias),
+      thinkingLevel: profile.thinkingLevel || ('none' as ThinkingLevel),
+      // Cursor-specific
+      cursorModel: profile.cursorModel || ('auto' as CursorModelId),
+      // Codex-specific - use a valid CodexModelId from CODEX_MODEL_MAP
+      codexModel: profile.codexModel || (CODEX_MODEL_MAP.gpt52Codex as CodexModelId),
+      // OpenCode-specific
+      opencodeModel: profile.opencodeModel || (DEFAULT_OPENCODE_MODEL as OpencodeModelId),
+      icon: profile.icon || 'Brain',
+    });
+  }, [profile]);
 
   const supportsThinking = formData.provider === 'claude' && modelSupportsThinking(formData.model);
 
@@ -55,10 +87,17 @@ export function ProfileForm({
     setFormData({
       ...formData,
       provider,
-      // Reset to defaults when switching providers
+      // Only reset Claude fields when switching TO Claude; preserve otherwise
       model: provider === 'claude' ? 'sonnet' : formData.model,
       thinkingLevel: provider === 'claude' ? 'none' : formData.thinkingLevel,
+      // Reset cursor/codex/opencode models when switching to that provider
       cursorModel: provider === 'cursor' ? 'auto' : formData.cursorModel,
+      codexModel:
+        provider === 'codex' ? (CODEX_MODEL_MAP.gpt52Codex as CodexModelId) : formData.codexModel,
+      opencodeModel:
+        provider === 'opencode'
+          ? (DEFAULT_OPENCODE_MODEL as OpencodeModelId)
+          : formData.opencodeModel,
     });
   };
 
@@ -76,11 +115,34 @@ export function ProfileForm({
     });
   };
 
+  const handleCodexModelChange = (codexModel: CodexModelId) => {
+    setFormData({
+      ...formData,
+      codexModel,
+    });
+  };
+
+  const handleOpencodeModelChange = (opencodeModel: OpencodeModelId) => {
+    setFormData({
+      ...formData,
+      opencodeModel,
+    });
+  };
+
   const handleSubmit = () => {
     if (!formData.name.trim()) {
       toast.error('Please enter a profile name');
       return;
     }
+
+    // Ensure model is always set for Claude profiles
+    const validModels: ModelAlias[] = ['haiku', 'sonnet', 'opus'];
+    const finalModel =
+      formData.provider === 'claude'
+        ? validModels.includes(formData.model)
+          ? formData.model
+          : 'sonnet'
+        : undefined;
 
     const baseProfile = {
       name: formData.name.trim(),
@@ -95,10 +157,20 @@ export function ProfileForm({
         ...baseProfile,
         cursorModel: formData.cursorModel,
       });
+    } else if (formData.provider === 'codex') {
+      onSave({
+        ...baseProfile,
+        codexModel: formData.codexModel,
+      });
+    } else if (formData.provider === 'opencode') {
+      onSave({
+        ...baseProfile,
+        opencodeModel: formData.opencodeModel,
+      });
     } else {
       onSave({
         ...baseProfile,
-        model: formData.model,
+        model: finalModel as ModelAlias,
         thinkingLevel: supportsThinking ? formData.thinkingLevel : 'none',
       });
     }
@@ -158,34 +230,62 @@ export function ProfileForm({
         {/* Provider Selection */}
         <div className="space-y-2">
           <Label>AI Provider</Label>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <button
               type="button"
               onClick={() => handleProviderChange('claude')}
               className={cn(
-                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                'px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
                 formData.provider === 'claude'
                   ? 'bg-primary text-primary-foreground border-primary'
                   : 'bg-background hover:bg-accent border-border'
               )}
               data-testid="provider-select-claude"
             >
-              <Bot className="w-4 h-4" />
+              <AnthropicIcon className="w-4 h-4" />
               Claude
             </button>
             <button
               type="button"
               onClick={() => handleProviderChange('cursor')}
               className={cn(
-                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                'px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
                 formData.provider === 'cursor'
                   ? 'bg-primary text-primary-foreground border-primary'
                   : 'bg-background hover:bg-accent border-border'
               )}
               data-testid="provider-select-cursor"
             >
-              <Terminal className="w-4 h-4" />
-              Cursor CLI
+              <CursorIcon className="w-4 h-4" />
+              Cursor
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProviderChange('codex')}
+              className={cn(
+                'px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                formData.provider === 'codex'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid="provider-select-codex"
+            >
+              <OpenAIIcon className="w-4 h-4" />
+              Codex
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProviderChange('opencode')}
+              className={cn(
+                'px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                formData.provider === 'opencode'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid="provider-select-opencode"
+            >
+              <OpenCodeIcon className="w-4 h-4" />
+              OpenCode
             </button>
           </div>
         </div>
@@ -222,7 +322,7 @@ export function ProfileForm({
         {formData.provider === 'cursor' && (
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-primary" />
+              <CursorIcon className="w-4 h-4 text-primary" />
               Cursor Model
             </Label>
             <div className="flex flex-col gap-2">
@@ -262,13 +362,13 @@ export function ProfileForm({
                           </Badge>
                         )}
                         <Badge
-                          variant={config.tier === 'free' ? 'default' : 'secondary'}
+                          variant="secondary"
                           className={cn(
                             'text-xs',
                             formData.cursorModel === id && 'bg-primary-foreground/20'
                           )}
                         >
-                          {config.tier}
+                          Tier
                         </Badge>
                       </div>
                     </button>
@@ -280,6 +380,123 @@ export function ProfileForm({
                 This model has built-in extended thinking capabilities.
               </p>
             )}
+          </div>
+        )}
+
+        {/* Codex Model Selection */}
+        {formData.provider === 'codex' && (
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <OpenAIIcon className="w-4 h-4 text-primary" />
+              Codex Model
+            </Label>
+            <div className="flex flex-col gap-2">
+              {Object.entries(CODEX_MODEL_MAP).map(([_, modelId]) => {
+                const modelConfig = {
+                  label: modelId,
+                  badge: 'Standard' as const,
+                  hasReasoning: false,
+                };
+
+                return (
+                  <button
+                    key={modelId}
+                    type="button"
+                    onClick={() => handleCodexModelChange(modelId)}
+                    className={cn(
+                      'w-full px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-between',
+                      formData.codexModel === modelId
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-background hover:bg-accent border-border'
+                    )}
+                    data-testid={`codex-model-select-${modelId}`}
+                  >
+                    <span>{modelConfig.label}</span>
+                    <div className="flex gap-1">
+                      {modelConfig.hasReasoning && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-xs',
+                            formData.codexModel === modelId
+                              ? 'border-primary-foreground/50 text-primary-foreground'
+                              : 'border-amber-500/50 text-amber-600 dark:text-amber-400'
+                          )}
+                        >
+                          Reasoning
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-xs',
+                          formData.codexModel === modelId
+                            ? 'border-primary-foreground/50 text-primary-foreground'
+                            : 'border-muted-foreground/50 text-muted-foreground'
+                        )}
+                      >
+                        {modelConfig.badge}
+                      </Badge>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* OpenCode Model Selection */}
+        {formData.provider === 'opencode' && (
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <OpenCodeIcon className="w-4 h-4 text-primary" />
+              OpenCode Model
+            </Label>
+            <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto">
+              {OPENCODE_MODELS.map((model) => (
+                <button
+                  key={model.id}
+                  type="button"
+                  onClick={() => handleOpencodeModelChange(model.id)}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-between',
+                    formData.opencodeModel === model.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background hover:bg-accent border-border'
+                  )}
+                  data-testid={`opencode-model-select-${model.id}`}
+                >
+                  <div className="flex flex-col items-start gap-0.5">
+                    <span>{model.label}</span>
+                    <span
+                      className={cn(
+                        'text-xs',
+                        formData.opencodeModel === model.id
+                          ? 'text-primary-foreground/70'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {model.description}
+                    </span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'text-xs capitalize shrink-0',
+                      formData.opencodeModel === model.id
+                        ? 'border-primary-foreground/50 text-primary-foreground'
+                        : model.tier === 'free'
+                          ? 'border-green-500/50 text-green-600 dark:text-green-400'
+                          : model.tier === 'premium'
+                            ? 'border-amber-500/50 text-amber-600 dark:text-amber-400'
+                            : 'border-muted-foreground/50 text-muted-foreground'
+                    )}
+                  >
+                    {model.tier}
+                  </Badge>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

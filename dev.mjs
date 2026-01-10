@@ -133,6 +133,7 @@ async function main() {
           env: {
             TEST_PORT: String(webPort),
             VITE_SERVER_URL: `http://localhost:${serverPort}`,
+            VITE_APP_MODE: '1',
           },
         },
         __dirname
@@ -159,6 +160,7 @@ async function main() {
             PORT: String(serverPort),
             VITE_SERVER_URL: `http://localhost:${serverPort}`,
             CORS_ORIGIN: corsOriginEnv,
+            VITE_APP_MODE: '2',
           },
         },
         __dirname

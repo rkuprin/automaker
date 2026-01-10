@@ -11,6 +11,7 @@
 import {
   CLAUDE_MODEL_MAP,
   CURSOR_MODEL_MAP,
+  CODEX_MODEL_MAP,
   DEFAULT_MODELS,
   PROVIDER_PREFIXES,
   isCursorModel,
@@ -18,6 +19,11 @@ import {
   type PhaseModelEntry,
   type ThinkingLevel,
 } from '@automaker/types';
+
+// Pattern definitions for Codex/OpenAI models
+const CODEX_MODEL_PREFIXES = ['codex-', 'gpt-'];
+const OPENAI_O_SERIES_PATTERN = /^o\d/;
+const OPENAI_O_SERIES_ALLOWED_MODELS = new Set<string>();
 
 /**
  * Resolve a model key/alias to a full model string
@@ -56,14 +62,10 @@ export function resolveModelString(
     return modelKey;
   }
 
-  // Check if it's a bare Cursor model ID (e.g., "composer-1", "auto", "gpt-4o")
-  if (modelKey in CURSOR_MODEL_MAP) {
-    // Return with cursor- prefix so provider routing works correctly
-    const prefixedModel = `${PROVIDER_PREFIXES.cursor}${modelKey}`;
-    console.log(
-      `[ModelResolver] Detected bare Cursor model ID: "${modelKey}" -> "${prefixedModel}"`
-    );
-    return prefixedModel;
+  // Codex model with explicit prefix (e.g., "codex-gpt-5.1-codex-max") - pass through unchanged
+  if (modelKey.startsWith(PROVIDER_PREFIXES.codex)) {
+    console.log(`[ModelResolver] Using Codex model: ${modelKey}`);
+    return modelKey;
   }
 
   // Full Claude model string - pass through unchanged
@@ -77,6 +79,26 @@ export function resolveModelString(
   if (resolved) {
     console.log(`[ModelResolver] Resolved Claude model alias: "${modelKey}" -> "${resolved}"`);
     return resolved;
+  }
+
+  // OpenAI/Codex models - check for codex- or gpt- prefix
+  if (
+    CODEX_MODEL_PREFIXES.some((prefix) => modelKey.startsWith(prefix)) ||
+    (OPENAI_O_SERIES_PATTERN.test(modelKey) && OPENAI_O_SERIES_ALLOWED_MODELS.has(modelKey))
+  ) {
+    console.log(`[ModelResolver] Using OpenAI/Codex model: ${modelKey}`);
+    return modelKey;
+  }
+
+  // Check if it's a bare Cursor model ID (e.g., "composer-1", "auto", "gpt-4o")
+  // Note: This is checked AFTER Codex check to prioritize Codex for bare gpt-* models
+  if (modelKey in CURSOR_MODEL_MAP) {
+    // Return with cursor- prefix so provider routing works correctly
+    const prefixedModel = `${PROVIDER_PREFIXES.cursor}${modelKey}`;
+    console.log(
+      `[ModelResolver] Detected bare Cursor model ID: "${modelKey}" -> "${prefixedModel}"`
+    );
+    return prefixedModel;
   }
 
   // Unknown model key - use default

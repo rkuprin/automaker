@@ -5,12 +5,9 @@
 
 import { createLogger } from '@automaker/utils/logger';
 import { getHttpApiClient } from './http-api-client';
-import { getElectronAPI } from './electron';
-import { getItem, setItem } from './storage';
+import { useAppStore } from '@/store/app-store';
 
 const logger = createLogger('WorkspaceConfig');
-
-const LAST_PROJECT_DIR_KEY = 'automaker:lastProjectDir';
 
 /**
  * Browser-compatible path join utility
@@ -35,9 +32,17 @@ function joinPath(...parts: string[]): string {
  */
 async function getDefaultDocumentsPath(): Promise<string | null> {
   try {
-    const api = getElectronAPI();
-    const documentsPath = await api.getPath('documents');
-    return joinPath(documentsPath, 'Automaker');
+    // In Electron mode, use the native getPath API directly from the preload script
+    // This returns the actual system Documents folder (e.g., C:\Users\<user>\Documents on Windows)
+    // Note: The HTTP client's getPath returns incorrect Unix-style paths for 'documents'
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.getPath) {
+      const documentsPath = await (window as any).electronAPI.getPath('documents');
+      return joinPath(documentsPath, 'Automaker');
+    }
+
+    // In web mode (no Electron), we can't access the user's Documents folder
+    // Return null to let the caller use other fallback mechanisms (like server's DATA_DIR)
+    return null;
   } catch (error) {
     logger.error('Failed to get documents path:', error);
     return null;
@@ -67,10 +72,10 @@ export async function getDefaultWorkspaceDirectory(): Promise<string | null> {
       }
 
       // If ALLOWED_ROOT_DIRECTORY is not set, use priority:
-      // 1. Last used directory
+      // 1. Last used directory (from store, synced via API)
       // 2. Documents/Automaker
       // 3. DATA_DIR as fallback
-      const lastUsedDir = getItem(LAST_PROJECT_DIR_KEY);
+      const lastUsedDir = useAppStore.getState().lastProjectDir;
 
       if (lastUsedDir) {
         return lastUsedDir;
@@ -78,6 +83,7 @@ export async function getDefaultWorkspaceDirectory(): Promise<string | null> {
 
       // Try to get Documents/Automaker
       const documentsPath = await getDefaultDocumentsPath();
+      logger.info('Default documentsPath resolved to:', documentsPath);
       if (documentsPath) {
         return documentsPath;
       }
@@ -89,7 +95,7 @@ export async function getDefaultWorkspaceDirectory(): Promise<string | null> {
     }
 
     // If API call failed, still try last used dir and Documents
-    const lastUsedDir = getItem(LAST_PROJECT_DIR_KEY);
+    const lastUsedDir = useAppStore.getState().lastProjectDir;
 
     if (lastUsedDir) {
       return lastUsedDir;
@@ -101,7 +107,7 @@ export async function getDefaultWorkspaceDirectory(): Promise<string | null> {
     logger.error('Failed to get default workspace directory:', error);
 
     // On error, try last used dir and Documents
-    const lastUsedDir = getItem(LAST_PROJECT_DIR_KEY);
+    const lastUsedDir = useAppStore.getState().lastProjectDir;
 
     if (lastUsedDir) {
       return lastUsedDir;
@@ -113,9 +119,9 @@ export async function getDefaultWorkspaceDirectory(): Promise<string | null> {
 }
 
 /**
- * Saves the last used project directory to localStorage
+ * Saves the last used project directory to the store (synced via API)
  * @param path - The directory path to save
  */
 export function saveLastProjectDirectory(path: string): void {
-  setItem(LAST_PROJECT_DIR_KEY, path);
+  useAppStore.getState().setLastProjectDir(path);
 }

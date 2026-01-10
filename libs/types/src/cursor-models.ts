@@ -1,6 +1,8 @@
 /**
  * Cursor CLI Model IDs
  * Reference: https://cursor.com/docs
+ *
+ * IMPORTANT: GPT models use 'cursor-' prefix to distinguish from Codex CLI models
  */
 export type CursorModelId =
   | 'auto' // Auto-select best model
@@ -12,14 +14,14 @@ export type CursorModelId =
   | 'opus-4.1' // Claude Opus 4.1
   | 'gemini-3-pro' // Gemini 3 Pro
   | 'gemini-3-flash' // Gemini 3 Flash
-  | 'gpt-5.2' // GPT-5.2
-  | 'gpt-5.1' // GPT-5.1
-  | 'gpt-5.2-high' // GPT-5.2 High
-  | 'gpt-5.1-high' // GPT-5.1 High
-  | 'gpt-5.1-codex' // GPT-5.1 Codex
-  | 'gpt-5.1-codex-high' // GPT-5.1 Codex High
-  | 'gpt-5.1-codex-max' // GPT-5.1 Codex Max
-  | 'gpt-5.1-codex-max-high' // GPT-5.1 Codex Max High
+  | 'cursor-gpt-5.2' // GPT-5.2 via Cursor
+  | 'cursor-gpt-5.1' // GPT-5.1 via Cursor
+  | 'cursor-gpt-5.2-high' // GPT-5.2 High via Cursor
+  | 'cursor-gpt-5.1-high' // GPT-5.1 High via Cursor
+  | 'cursor-gpt-5.1-codex' // GPT-5.1 Codex via Cursor
+  | 'cursor-gpt-5.1-codex-high' // GPT-5.1 Codex High via Cursor
+  | 'cursor-gpt-5.1-codex-max' // GPT-5.1 Codex Max via Cursor
+  | 'cursor-gpt-5.1-codex-max-high' // GPT-5.1 Codex Max High via Cursor
   | 'grok'; // Grok
 
 /**
@@ -101,57 +103,57 @@ export const CURSOR_MODEL_MAP: Record<CursorModelId, CursorModelConfig> = {
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.2': {
-    id: 'gpt-5.2',
+  'cursor-gpt-5.2': {
+    id: 'cursor-gpt-5.2',
     label: 'GPT-5.2',
     description: 'OpenAI GPT-5.2 via Cursor',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1': {
-    id: 'gpt-5.1',
+  'cursor-gpt-5.1': {
+    id: 'cursor-gpt-5.1',
     label: 'GPT-5.1',
     description: 'OpenAI GPT-5.1 via Cursor',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.2-high': {
-    id: 'gpt-5.2-high',
+  'cursor-gpt-5.2-high': {
+    id: 'cursor-gpt-5.2-high',
     label: 'GPT-5.2 High',
     description: 'OpenAI GPT-5.2 with high compute',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1-high': {
-    id: 'gpt-5.1-high',
+  'cursor-gpt-5.1-high': {
+    id: 'cursor-gpt-5.1-high',
     label: 'GPT-5.1 High',
     description: 'OpenAI GPT-5.1 with high compute',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1-codex': {
-    id: 'gpt-5.1-codex',
+  'cursor-gpt-5.1-codex': {
+    id: 'cursor-gpt-5.1-codex',
     label: 'GPT-5.1 Codex',
     description: 'OpenAI GPT-5.1 Codex for code generation',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1-codex-high': {
-    id: 'gpt-5.1-codex-high',
+  'cursor-gpt-5.1-codex-high': {
+    id: 'cursor-gpt-5.1-codex-high',
     label: 'GPT-5.1 Codex High',
     description: 'OpenAI GPT-5.1 Codex with high compute',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1-codex-max': {
-    id: 'gpt-5.1-codex-max',
+  'cursor-gpt-5.1-codex-max': {
+    id: 'cursor-gpt-5.1-codex-max',
     label: 'GPT-5.1 Codex Max',
     description: 'OpenAI GPT-5.1 Codex Max capacity',
     hasThinking: false,
     supportsVision: false,
   },
-  'gpt-5.1-codex-max-high': {
-    id: 'gpt-5.1-codex-max-high',
+  'cursor-gpt-5.1-codex-max-high': {
+    id: 'cursor-gpt-5.1-codex-max-high',
     label: 'GPT-5.1 Codex Max High',
     description: 'OpenAI GPT-5.1 Codex Max with high compute',
     hasThinking: false,
@@ -224,14 +226,14 @@ export interface GroupedModel {
 export const CURSOR_MODEL_GROUPS: GroupedModel[] = [
   // GPT-5.2 group (compute levels)
   {
-    baseId: 'gpt-5.2-group',
+    baseId: 'cursor-gpt-5.2-group',
     label: 'GPT-5.2',
     description: 'OpenAI GPT-5.2 via Cursor',
     variantType: 'compute',
     variants: [
-      { id: 'gpt-5.2', label: 'Standard', description: 'Default compute level' },
+      { id: 'cursor-gpt-5.2', label: 'Standard', description: 'Default compute level' },
       {
-        id: 'gpt-5.2-high',
+        id: 'cursor-gpt-5.2-high',
         label: 'High',
         description: 'High compute level',
         badge: 'More tokens',
@@ -240,14 +242,14 @@ export const CURSOR_MODEL_GROUPS: GroupedModel[] = [
   },
   // GPT-5.1 group (compute levels)
   {
-    baseId: 'gpt-5.1-group',
+    baseId: 'cursor-gpt-5.1-group',
     label: 'GPT-5.1',
     description: 'OpenAI GPT-5.1 via Cursor',
     variantType: 'compute',
     variants: [
-      { id: 'gpt-5.1', label: 'Standard', description: 'Default compute level' },
+      { id: 'cursor-gpt-5.1', label: 'Standard', description: 'Default compute level' },
       {
-        id: 'gpt-5.1-high',
+        id: 'cursor-gpt-5.1-high',
         label: 'High',
         description: 'High compute level',
         badge: 'More tokens',
@@ -256,16 +258,26 @@ export const CURSOR_MODEL_GROUPS: GroupedModel[] = [
   },
   // GPT-5.1 Codex group (capacity + compute matrix)
   {
-    baseId: 'gpt-5.1-codex-group',
+    baseId: 'cursor-gpt-5.1-codex-group',
     label: 'GPT-5.1 Codex',
     description: 'OpenAI GPT-5.1 Codex for code generation',
     variantType: 'capacity',
     variants: [
-      { id: 'gpt-5.1-codex', label: 'Standard', description: 'Default capacity' },
-      { id: 'gpt-5.1-codex-high', label: 'High', description: 'High compute', badge: 'Compute' },
-      { id: 'gpt-5.1-codex-max', label: 'Max', description: 'Maximum capacity', badge: 'Capacity' },
+      { id: 'cursor-gpt-5.1-codex', label: 'Standard', description: 'Default capacity' },
       {
-        id: 'gpt-5.1-codex-max-high',
+        id: 'cursor-gpt-5.1-codex-high',
+        label: 'High',
+        description: 'High compute',
+        badge: 'Compute',
+      },
+      {
+        id: 'cursor-gpt-5.1-codex-max',
+        label: 'Max',
+        description: 'Maximum capacity',
+        badge: 'Capacity',
+      },
+      {
+        id: 'cursor-gpt-5.1-codex-max-high',
         label: 'Max High',
         description: 'Max capacity + high compute',
         badge: 'Premium',

@@ -23,8 +23,6 @@ import type {
   SpecRegenerationEvent,
   SuggestionType,
   GitHubAPI,
-  GitHubIssue,
-  GitHubPR,
   IssueValidationInput,
   IssueValidationEvent,
   IdeationAPI,
@@ -36,7 +34,7 @@ import type {
   ConvertToFeatureOptions,
 } from './electron';
 import type { Message, SessionListItem } from '@/types/electron';
-import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
+import type { Feature, ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
@@ -44,6 +42,85 @@ const logger = createLogger('HttpClient');
 
 // Cached server URL (set during initialization in Electron mode)
 let cachedServerUrl: string | null = null;
+
+/**
+ * Notify the UI that the current session is no longer valid.
+ * Used to redirect the user to a logged-out route on 401/403 responses.
+ */
+const notifyLoggedOut = (): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('automaker:logged-out'));
+  } catch {
+    // Ignore - navigation will still be handled by failed requests in most cases
+  }
+};
+
+/**
+ * Handle an unauthorized response in cookie/session auth flows.
+ * Clears in-memory token and attempts to clear the cookie (best-effort),
+ * then notifies the UI to redirect.
+ */
+const handleUnauthorized = (): void => {
+  clearSessionToken();
+  // Best-effort cookie clear (avoid throwing)
+  fetch(`${getServerUrl()}/api/auth/logout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: '{}',
+  }).catch(() => {});
+  notifyLoggedOut();
+};
+
+/**
+ * Notify the UI that the server is offline/unreachable.
+ * Used to redirect the user to the login page which will show server unavailable.
+ */
+const notifyServerOffline = (): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('automaker:server-offline'));
+  } catch {
+    // Ignore
+  }
+};
+
+/**
+ * Check if an error is a connection error (server offline/unreachable).
+ * These are typically TypeError with 'Failed to fetch' or similar network errors.
+ */
+export const isConnectionError = (error: unknown): boolean => {
+  if (error instanceof TypeError) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('network') ||
+      message.includes('econnrefused') ||
+      message.includes('connection refused')
+    );
+  }
+  // Check for error objects with message property
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = String((error as { message: unknown }).message).toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('network') ||
+      message.includes('econnrefused') ||
+      message.includes('connection refused')
+    );
+  }
+  return false;
+};
+
+/**
+ * Handle a server offline error by notifying the UI to redirect.
+ * Call this when a connection error is detected.
+ */
+export const handleServerOffline = (): void => {
+  logger.error('Server appears to be offline, redirecting to login...');
+  notifyServerOffline();
+};
 
 /**
  * Initialize server URL from Electron IPC.
@@ -88,6 +165,7 @@ let apiKeyInitialized = false;
 let apiKeyInitPromise: Promise<void> | null = null;
 
 // Cached session token for authentication (Web mode - explicit header auth)
+// Only used in-memory after fresh login; on refresh we rely on HTTP-only cookies
 let cachedSessionToken: string | null = null;
 
 // Get API key for Electron mode (returns cached value after initialization)
@@ -105,10 +183,10 @@ export const waitForApiKeyInit = (): Promise<void> => {
   return initApiKey();
 };
 
-// Get session token for Web mode (returns cached value after login or token fetch)
+// Get session token for Web mode (returns cached value after login)
 export const getSessionToken = (): string | null => cachedSessionToken;
 
-// Set session token (called after login or token fetch)
+// Set session token (called after login)
 export const setSessionToken = (token: string | null): void => {
   cachedSessionToken = token;
 };
@@ -311,6 +389,7 @@ export const logout = async (): Promise<{ success: boolean }> => {
   try {
     const response = await fetch(`${getServerUrl()}/api/auth/logout`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
     });
 
@@ -331,52 +410,58 @@ export const logout = async (): Promise<{ success: boolean }> => {
  * This should be called:
  * 1. After login to verify the cookie was set correctly
  * 2. On app load to verify the session hasn't expired
+ *
+ * Returns:
+ * - true: Session is valid
+ * - false: Session is definitively invalid (401/403 auth failure)
+ * - throws: Network error or server not ready (caller should retry)
  */
 export const verifySession = async (): Promise<boolean> => {
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
 
-    // Add session token header if available
-    const sessionToken = getSessionToken();
-    if (sessionToken) {
-      headers['X-Session-Token'] = sessionToken;
-    }
+  // Electron mode: use API key header
+  const apiKey = getApiKey();
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
 
-    // Make a request to an authenticated endpoint to verify the session
-    // We use /api/settings/status as it requires authentication and is lightweight
-    const response = await fetch(`${getServerUrl()}/api/settings/status`, {
-      headers,
-      credentials: 'include',
-    });
+  // Add session token header if available (web mode)
+  const sessionToken = getSessionToken();
+  if (sessionToken) {
+    headers['X-Session-Token'] = sessionToken;
+  }
 
-    // Check for authentication errors
-    if (response.status === 401 || response.status === 403) {
-      logger.warn('Session verification failed - session expired or invalid');
-      // Clear the session since it's no longer valid
-      clearSessionToken();
-      // Try to clear the cookie via logout (fire and forget)
-      fetch(`${getServerUrl()}/api/auth/logout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: '{}',
-      }).catch(() => {});
-      return false;
-    }
+  // Make a request to an authenticated endpoint to verify the session
+  // We use /api/settings/status as it requires authentication and is lightweight
+  // Note: fetch throws on network errors, which we intentionally let propagate
+  const response = await fetch(`${getServerUrl()}/api/settings/status`, {
+    headers,
+    credentials: 'include',
+    // Avoid hanging indefinitely during backend reloads or network issues
+    signal: AbortSignal.timeout(2500),
+  });
 
-    if (!response.ok) {
-      logger.warn('Session verification failed with status:', response.status);
-      return false;
-    }
-
-    logger.info('Session verified successfully');
-    return true;
-  } catch (error) {
-    logger.error('Session verification error:', error);
+  // Check for authentication errors - these are definitive "invalid session" responses
+  if (response.status === 401 || response.status === 403) {
+    logger.warn('Session verification failed - session expired or invalid');
+    // Clear the in-memory/localStorage session token since it's no longer valid
+    // Note: We do NOT call logout here - that would destroy a potentially valid
+    // cookie if the issue was transient (e.g., token not sent due to timing)
+    clearSessionToken();
     return false;
   }
+
+  // For other non-ok responses (5xx, etc.), throw to trigger retry
+  if (!response.ok) {
+    const error = new Error(`Session verification failed with status: ${response.status}`);
+    logger.warn('Session verification failed with status:', response.status);
+    throw error;
+  }
+
+  logger.info('Session verified successfully');
+  return true;
 };
 
 /**
@@ -390,6 +475,7 @@ export const checkSandboxEnvironment = async (): Promise<{
   try {
     const response = await fetch(`${getServerUrl()}/api/health/environment`, {
       method: 'GET',
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!response.ok) {
@@ -471,6 +557,11 @@ export class HttpApiClient implements ElectronAPI {
         headers,
         credentials: 'include',
       });
+
+      if (response.status === 401 || response.status === 403) {
+        handleUnauthorized();
+        return null;
+      }
 
       if (!response.ok) {
         logger.warn('Failed to fetch wsToken:', response.status);
@@ -663,6 +754,11 @@ export class HttpApiClient implements ElectronAPI {
       body: body ? JSON.stringify(body) : undefined,
     });
 
+    if (response.status === 401 || response.status === 403) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
+
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
       try {
@@ -686,6 +782,11 @@ export class HttpApiClient implements ElectronAPI {
       headers: this.getHeaders(),
       credentials: 'include', // Include cookies for session auth
     });
+
+    if (response.status === 401 || response.status === 403) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -713,6 +814,11 @@ export class HttpApiClient implements ElectronAPI {
       body: body ? JSON.stringify(body) : undefined,
     });
 
+    if (response.status === 401 || response.status === 403) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
+
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
       try {
@@ -737,6 +843,11 @@ export class HttpApiClient implements ElectronAPI {
       headers: this.getHeaders(),
       credentials: 'include', // Include cookies for session auth
     });
+
+    if (response.status === 401 || response.status === 403) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -1019,6 +1130,14 @@ export class HttpApiClient implements ElectronAPI {
       output?: string;
     }> => this.post('/api/setup/auth-claude'),
 
+    deauthClaude: (): Promise<{
+      success: boolean;
+      requiresManualDeauth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/deauth-claude'),
+
     storeApiKey: (
       provider: string,
       apiKey: string,
@@ -1085,6 +1204,42 @@ export class HttpApiClient implements ElectronAPI {
       loginCommand?: string;
       error?: string;
     }> => this.get('/api/setup/cursor-status'),
+
+    authCursor: (): Promise<{
+      success: boolean;
+      token?: string;
+      requiresManualAuth?: boolean;
+      terminalOpened?: boolean;
+      command?: string;
+      message?: string;
+      output?: string;
+    }> => this.post('/api/setup/auth-cursor'),
+
+    deauthCursor: (): Promise<{
+      success: boolean;
+      requiresManualDeauth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/deauth-cursor'),
+
+    authOpencode: (): Promise<{
+      success: boolean;
+      token?: string;
+      requiresManualAuth?: boolean;
+      terminalOpened?: boolean;
+      command?: string;
+      message?: string;
+      output?: string;
+    }> => this.post('/api/setup/auth-opencode'),
+
+    deauthOpencode: (): Promise<{
+      success: boolean;
+      requiresManualDeauth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/deauth-opencode'),
 
     getCursorConfig: (
       projectPath: string
@@ -1191,6 +1346,86 @@ export class HttpApiClient implements ElectronAPI {
         `/api/setup/cursor-permissions/example${profileId ? `?profileId=${profileId}` : ''}`
       ),
 
+    // Codex CLI methods
+    getCodexStatus: (): Promise<{
+      success: boolean;
+      status?: string;
+      installed?: boolean;
+      method?: string;
+      version?: string;
+      path?: string;
+      auth?: {
+        authenticated: boolean;
+        method: string;
+        hasAuthFile?: boolean;
+        hasOAuthToken?: boolean;
+        hasApiKey?: boolean;
+        hasStoredApiKey?: boolean;
+        hasEnvApiKey?: boolean;
+      };
+      error?: string;
+    }> => this.get('/api/setup/codex-status'),
+
+    installCodex: (): Promise<{
+      success: boolean;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/install-codex'),
+
+    authCodex: (): Promise<{
+      success: boolean;
+      token?: string;
+      requiresManualAuth?: boolean;
+      terminalOpened?: boolean;
+      command?: string;
+      error?: string;
+      message?: string;
+      output?: string;
+    }> => this.post('/api/setup/auth-codex'),
+
+    deauthCodex: (): Promise<{
+      success: boolean;
+      requiresManualDeauth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/deauth-codex'),
+
+    verifyCodexAuth: (
+      authMethod: 'cli' | 'api_key',
+      apiKey?: string
+    ): Promise<{
+      success: boolean;
+      authenticated: boolean;
+      error?: string;
+    }> => this.post('/api/setup/verify-codex-auth', { authMethod, apiKey }),
+
+    // OpenCode CLI methods
+    getOpencodeStatus: (): Promise<{
+      success: boolean;
+      status?: string;
+      installed?: boolean;
+      method?: string;
+      version?: string;
+      path?: string;
+      recommendation?: string;
+      installCommands?: {
+        macos?: string;
+        linux?: string;
+        npm?: string;
+      };
+      auth?: {
+        authenticated: boolean;
+        method: string;
+        hasAuthFile?: boolean;
+        hasOAuthToken?: boolean;
+        hasApiKey?: boolean;
+        hasStoredApiKey?: boolean;
+        hasEnvApiKey?: boolean;
+      };
+      error?: string;
+    }> => this.get('/api/setup/opencode-status'),
+
     onInstallProgress: (callback: (progress: unknown) => void) => {
       return this.subscribeToEvent('agent:stream', callback);
     },
@@ -1220,8 +1455,20 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/get', { projectPath, featureId }),
     create: (projectPath: string, feature: Feature) =>
       this.post('/api/features/create', { projectPath, feature }),
-    update: (projectPath: string, featureId: string, updates: Partial<Feature>) =>
-      this.post('/api/features/update', { projectPath, featureId, updates }),
+    update: (
+      projectPath: string,
+      featureId: string,
+      updates: Partial<Feature>,
+      descriptionHistorySource?: 'enhance' | 'edit',
+      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+    ) =>
+      this.post('/api/features/update', {
+        projectPath,
+        featureId,
+        updates,
+        descriptionHistorySource,
+        enhancementMode,
+      }),
     delete: (projectPath: string, featureId: string) =>
       this.post('/api/features/delete', { projectPath, featureId }),
     getAgentOutput: (projectPath: string, featureId: string) =>
@@ -1746,6 +1993,26 @@ export class HttpApiClient implements ElectronAPI {
       migratedProjectCount: number;
       errors: string[];
     }> => this.post('/api/settings/migrate', { data }),
+
+    // Filesystem agents discovery (read-only)
+    discoverAgents: (
+      projectPath?: string,
+      sources?: Array<'user' | 'project'>
+    ): Promise<{
+      success: boolean;
+      agents?: Array<{
+        name: string;
+        definition: {
+          description: string;
+          prompt: string;
+          tools?: string[];
+          model?: 'sonnet' | 'opus' | 'haiku' | 'inherit';
+        };
+        source: 'user' | 'project';
+        filePath: string;
+      }>;
+      error?: string;
+    }> => this.post('/api/settings/agents/discover', { projectPath, sources }),
   };
 
   // Sessions API
@@ -1795,6 +2062,11 @@ export class HttpApiClient implements ElectronAPI {
   // Claude API
   claude = {
     getUsage: (): Promise<ClaudeUsageResponse> => this.get('/api/claude/usage'),
+  };
+
+  // Codex API
+  codex = {
+    getUsage: (): Promise<CodexUsageResponse> => this.get('/api/codex/usage'),
   };
 
   // Context API

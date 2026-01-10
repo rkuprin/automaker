@@ -2,18 +2,42 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProviderFactory } from '@/providers/provider-factory.js';
 import { ClaudeProvider } from '@/providers/claude-provider.js';
 import { CursorProvider } from '@/providers/cursor-provider.js';
+import { CodexProvider } from '@/providers/codex-provider.js';
+import { OpencodeProvider } from '@/providers/opencode-provider.js';
 
 describe('provider-factory.ts', () => {
   let consoleSpy: any;
+  let detectClaudeSpy: any;
+  let detectCursorSpy: any;
+  let detectCodexSpy: any;
+  let detectOpencodeSpy: any;
 
   beforeEach(() => {
     consoleSpy = {
       warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
     };
+
+    // Avoid hitting real CLI / filesystem checks during unit tests
+    detectClaudeSpy = vi
+      .spyOn(ClaudeProvider.prototype, 'detectInstallation')
+      .mockResolvedValue({ installed: true });
+    detectCursorSpy = vi
+      .spyOn(CursorProvider.prototype, 'detectInstallation')
+      .mockResolvedValue({ installed: true });
+    detectCodexSpy = vi
+      .spyOn(CodexProvider.prototype, 'detectInstallation')
+      .mockResolvedValue({ installed: true });
+    detectOpencodeSpy = vi
+      .spyOn(OpencodeProvider.prototype, 'detectInstallation')
+      .mockResolvedValue({ installed: true });
   });
 
   afterEach(() => {
     consoleSpy.warn.mockRestore();
+    detectClaudeSpy.mockRestore();
+    detectCursorSpy.mockRestore();
+    detectCodexSpy.mockRestore();
+    detectOpencodeSpy.mockRestore();
   });
 
   describe('getProviderForModel', () => {
@@ -111,10 +135,11 @@ describe('provider-factory.ts', () => {
     });
 
     describe('Cursor models via model ID lookup', () => {
-      it('should return CursorProvider for gpt-5.2 (valid Cursor model)', () => {
-        // gpt-5.2 is in CURSOR_MODEL_MAP
+      it('should return CodexProvider for gpt-5.2 (Codex model, not Cursor)', () => {
+        // gpt-5.2 is in both CURSOR_MODEL_MAP and CODEX_MODEL_CONFIG_MAP
+        // It should route to Codex since Codex models take priority
         const provider = ProviderFactory.getProviderForModel('gpt-5.2');
-        expect(provider).toBeInstanceOf(CursorProvider);
+        expect(provider).toBeInstanceOf(CodexProvider);
       });
 
       it('should return CursorProvider for grok (valid Cursor model)', () => {
@@ -141,9 +166,9 @@ describe('provider-factory.ts', () => {
       expect(hasClaudeProvider).toBe(true);
     });
 
-    it('should return exactly 2 providers', () => {
+    it('should return exactly 4 providers', () => {
       const providers = ProviderFactory.getAllProviders();
-      expect(providers).toHaveLength(2);
+      expect(providers).toHaveLength(4);
     });
 
     it('should include CursorProvider', () => {
@@ -179,7 +204,9 @@ describe('provider-factory.ts', () => {
 
       expect(keys).toContain('claude');
       expect(keys).toContain('cursor');
-      expect(keys).toHaveLength(2);
+      expect(keys).toContain('codex');
+      expect(keys).toContain('opencode');
+      expect(keys).toHaveLength(4);
     });
 
     it('should include cursor status', async () => {

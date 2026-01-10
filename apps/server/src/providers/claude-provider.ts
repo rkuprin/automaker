@@ -10,7 +10,7 @@ import { BaseProvider } from './base-provider.js';
 import { classifyError, getUserFriendlyErrorMessage, createLogger } from '@automaker/utils';
 
 const logger = createLogger('ClaudeProvider');
-import { getThinkingTokenBudget } from '@automaker/types';
+import { getThinkingTokenBudget, validateBareModelId } from '@automaker/types';
 import type {
   ExecuteOptions,
   ProviderMessage,
@@ -54,6 +54,10 @@ export class ClaudeProvider extends BaseProvider {
    * Execute a query using Claude Agent SDK
    */
   async *executeQuery(options: ExecuteOptions): AsyncGenerator<ProviderMessage> {
+    // Validate that model doesn't have a provider prefix
+    // AgentService should strip prefixes before passing to providers
+    validateBareModelId(options.model, 'ClaudeProvider');
+
     const {
       prompt,
       model,
@@ -71,14 +75,6 @@ export class ClaudeProvider extends BaseProvider {
     const maxThinkingTokens = getThinkingTokenBudget(thinkingLevel);
 
     // Build Claude SDK options
-    // AUTONOMOUS MODE: Always bypass permissions for fully autonomous operation
-    const hasMcpServers = options.mcpServers && Object.keys(options.mcpServers).length > 0;
-    const defaultTools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'];
-
-    // AUTONOMOUS MODE: Always bypass permissions and allow unrestricted tools
-    // Only restrict tools when no MCP servers are configured
-    const shouldRestrictTools = !hasMcpServers;
-
     const sdkOptions: Options = {
       model,
       systemPrompt,
@@ -86,10 +82,9 @@ export class ClaudeProvider extends BaseProvider {
       cwd,
       // Pass only explicitly allowed environment variables to SDK
       env: buildEnv(),
-      // Only restrict tools if explicitly set OR (no MCP / unrestricted disabled)
-      ...(allowedTools && shouldRestrictTools && { allowedTools }),
-      ...(!allowedTools && shouldRestrictTools && { allowedTools: defaultTools }),
-      // AUTONOMOUS MODE: Always bypass permissions and allow dangerous operations
+      // Pass through allowedTools if provided by caller (decided by sdk-options.ts)
+      ...(allowedTools && { allowedTools }),
+      // AUTONOMOUS MODE: Always bypass permissions for fully autonomous operation
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       abortController,
@@ -99,12 +94,12 @@ export class ClaudeProvider extends BaseProvider {
         : {}),
       // Forward settingSources for CLAUDE.md file loading
       ...(options.settingSources && { settingSources: options.settingSources }),
-      // Forward sandbox configuration
-      ...(options.sandbox && { sandbox: options.sandbox }),
       // Forward MCP servers configuration
       ...(options.mcpServers && { mcpServers: options.mcpServers }),
       // Extended thinking configuration
       ...(maxThinkingTokens && { maxThinkingTokens }),
+      // Subagents configuration for specialized task delegation
+      ...(options.agents && { agents: options.agents }),
     };
 
     // Build prompt payload

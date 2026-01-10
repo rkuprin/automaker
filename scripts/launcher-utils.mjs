@@ -986,6 +986,7 @@ export async function launchDockerDevServerContainer({ baseDir, processes }) {
       SKIP_EMBEDDED_SERVER: 'true',
       PORT: '3008',
       VITE_SERVER_URL: 'http://localhost:3008',
+      VITE_APP_MODE: '4',
     },
   });
 

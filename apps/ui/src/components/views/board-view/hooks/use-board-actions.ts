@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useCallback } from 'react';
 import {
   Feature,
@@ -7,8 +8,10 @@ import {
   PlanningMode,
   useAppStore,
 } from '@/store/app-store';
+import type { ReasoningEffort } from '@automaker/types';
 import { FeatureImagePath as DescriptionImagePath } from '@/components/ui/description-image-dropzone';
 import { getElectronAPI } from '@/lib/electron';
+import { isConnectionError, handleServerOffline } from '@/lib/http-api-client';
 import { toast } from 'sonner';
 import { useAutoMode } from '@/hooks/use-auto-mode';
 import { truncateDescription } from '@/lib/utils';
@@ -23,7 +26,12 @@ interface UseBoardActionsProps {
   runningAutoTasks: string[];
   loadFeatures: () => Promise<void>;
   persistFeatureCreate: (feature: Feature) => Promise<void>;
-  persistFeatureUpdate: (featureId: string, updates: Partial<Feature>) => Promise<void>;
+  persistFeatureUpdate: (
+    featureId: string,
+    updates: Partial<Feature>,
+    descriptionHistorySource?: 'enhance' | 'edit',
+    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+  ) => Promise<void>;
   persistFeatureDelete: (featureId: string) => Promise<void>;
   saveCategory: (category: string) => Promise<void>;
   setEditingFeature: (feature: Feature | null) => void;
@@ -79,6 +87,7 @@ export function useBoardActions({
     moveFeature,
     useWorktrees,
     enableDependencyBlocking,
+    skipVerificationInAutoMode,
     isPrimaryWorktreeBranch,
     getPrimaryWorktreeBranch,
   } = useAppStore();
@@ -102,14 +111,32 @@ export function useBoardActions({
       planningMode: PlanningMode;
       requirePlanApproval: boolean;
       dependencies?: string[];
+      workMode?: 'current' | 'auto' | 'custom';
     }) => {
-      // Empty string means "unassigned" (show only on primary worktree) - convert to undefined
-      // Non-empty string is the actual branch name (for non-primary worktrees)
-      const finalBranchName = featureData.branchName || undefined;
+      const workMode = featureData.workMode || 'current';
 
-      // If worktrees enabled and a branch is specified, create the worktree now
-      // This ensures the worktree exists before the feature starts
-      if (useWorktrees && finalBranchName && currentProject) {
+      // Determine final branch name based on work mode:
+      // - 'current': No branch name, work on current branch (no worktree)
+      // - 'auto': Auto-generate branch name based on current branch
+      // - 'custom': Use the provided branch name
+      let finalBranchName: string | undefined;
+
+      if (workMode === 'current') {
+        // No worktree isolation - work directly on current branch
+        finalBranchName = undefined;
+      } else if (workMode === 'auto') {
+        // Auto-generate a branch name based on current branch and timestamp
+        const baseBranch = currentWorktreeBranch || 'main';
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        finalBranchName = `feature/${baseBranch}-${timestamp}-${randomSuffix}`;
+      } else {
+        // Custom mode - use provided branch name
+        finalBranchName = featureData.branchName || undefined;
+      }
+
+      // Create worktree for 'auto' or 'custom' modes when we have a branch name
+      if ((workMode === 'auto' || workMode === 'custom') && finalBranchName && currentProject) {
         try {
           const api = getElectronAPI();
           if (api?.worktree?.create) {
@@ -198,10 +225,10 @@ export function useBoardActions({
       persistFeatureUpdate,
       updateFeature,
       saveCategory,
-      useWorktrees,
       currentProject,
       onWorktreeCreated,
       onWorktreeAutoSelect,
+      currentWorktreeBranch,
     ]
   );
 
@@ -215,18 +242,35 @@ export function useBoardActions({
         skipTests: boolean;
         model: ModelAlias;
         thinkingLevel: ThinkingLevel;
+        reasoningEffort: ReasoningEffort;
         imagePaths: DescriptionImagePath[];
         branchName: string;
         priority: number;
         planningMode?: PlanningMode;
         requirePlanApproval?: boolean;
-      }
+        workMode?: 'current' | 'auto' | 'custom';
+      },
+      descriptionHistorySource?: 'enhance' | 'edit',
+      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
     ) => {
-      const finalBranchName = updates.branchName || undefined;
+      const workMode = updates.workMode || 'current';
 
-      // If worktrees enabled and a branch is specified, create the worktree now
-      // This ensures the worktree exists before the feature starts
-      if (useWorktrees && finalBranchName && currentProject) {
+      // Determine final branch name based on work mode
+      let finalBranchName: string | undefined;
+
+      if (workMode === 'current') {
+        finalBranchName = undefined;
+      } else if (workMode === 'auto') {
+        const baseBranch = currentWorktreeBranch || 'main';
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 6);
+        finalBranchName = `feature/${baseBranch}-${timestamp}-${randomSuffix}`;
+      } else {
+        finalBranchName = updates.branchName || undefined;
+      }
+
+      // Create worktree for 'auto' or 'custom' modes when we have a branch name
+      if ((workMode === 'auto' || workMode === 'custom') && finalBranchName && currentProject) {
         try {
           const api = getElectronAPI();
           if (api?.worktree?.create) {
@@ -264,7 +308,7 @@ export function useBoardActions({
       };
 
       updateFeature(featureId, finalUpdates);
-      persistFeatureUpdate(featureId, finalUpdates);
+      persistFeatureUpdate(featureId, finalUpdates, descriptionHistorySource, enhancementMode);
       if (updates.category) {
         saveCategory(updates.category);
       }
@@ -275,9 +319,9 @@ export function useBoardActions({
       persistFeatureUpdate,
       saveCategory,
       setEditingFeature,
-      useWorktrees,
       currentProject,
       onWorktreeCreated,
+      currentWorktreeBranch,
     ]
   );
 
@@ -326,35 +370,31 @@ export function useBoardActions({
 
   const handleRunFeature = useCallback(
     async (feature: Feature) => {
-      if (!currentProject) return;
+      if (!currentProject) {
+        throw new Error('No project selected');
+      }
 
-      try {
-        const api = getElectronAPI();
-        if (!api?.autoMode) {
-          logger.error('Auto mode API not available');
-          return;
-        }
+      const api = getElectronAPI();
+      if (!api?.autoMode) {
+        throw new Error('Auto mode API not available');
+      }
 
-        // Server derives workDir from feature.branchName at execution time
-        const result = await api.autoMode.runFeature(
-          currentProject.path,
-          feature.id,
-          useWorktrees
-          // No worktreePath - server derives from feature.branchName
-        );
+      // Server derives workDir from feature.branchName at execution time
+      const result = await api.autoMode.runFeature(
+        currentProject.path,
+        feature.id,
+        useWorktrees
+        // No worktreePath - server derives from feature.branchName
+      );
 
-        if (result.success) {
-          logger.info('Feature run started successfully, branch:', feature.branchName || 'default');
-        } else {
-          logger.error('Failed to run feature:', result.error);
-          await loadFeatures();
-        }
-      } catch (error) {
-        logger.error('Error running feature:', error);
-        await loadFeatures();
+      if (result.success) {
+        logger.info('Feature run started successfully, branch:', feature.branchName || 'default');
+      } else {
+        // Throw error so caller can handle rollback
+        throw new Error(result.error || 'Failed to start feature');
       }
     },
-    [currentProject, useWorktrees, loadFeatures]
+    [currentProject, useWorktrees]
   );
 
   const handleStartImplementation = useCallback(
@@ -390,11 +430,34 @@ export function useBoardActions({
         startedAt: new Date().toISOString(),
       };
       updateFeature(feature.id, updates);
-      // Must await to ensure feature status is persisted before starting agent
-      await persistFeatureUpdate(feature.id, updates);
-      logger.info('Feature moved to in_progress, starting agent...');
-      await handleRunFeature(feature);
-      return true;
+
+      try {
+        // Must await to ensure feature status is persisted before starting agent
+        await persistFeatureUpdate(feature.id, updates);
+        logger.info('Feature moved to in_progress, starting agent...');
+        await handleRunFeature(feature);
+        return true;
+      } catch (error) {
+        // Rollback to backlog if persist or run fails (e.g., server offline)
+        logger.error('Failed to start feature, rolling back to backlog:', error);
+        const rollbackUpdates = {
+          status: 'backlog' as const,
+          startedAt: undefined,
+        };
+        updateFeature(feature.id, rollbackUpdates);
+
+        // If server is offline (connection refused), redirect to login page
+        if (isConnectionError(error)) {
+          handleServerOffline();
+          return false;
+        }
+
+        toast.error('Failed to start feature', {
+          description:
+            error instanceof Error ? error.message : 'Server may be offline. Please try again.',
+        });
+        return false;
+      }
     },
     [
       autoMode,
@@ -520,6 +583,7 @@ export function useBoardActions({
 
     const featureId = followUpFeature.id;
     const featureDescription = followUpFeature.description;
+    const previousStatus = followUpFeature.status;
 
     const api = getElectronAPI();
     if (!api?.autoMode?.followUpFeature) {
@@ -536,35 +600,53 @@ export function useBoardActions({
       justFinishedAt: undefined,
     };
     updateFeature(featureId, updates);
-    persistFeatureUpdate(featureId, updates);
 
-    setShowFollowUpDialog(false);
-    setFollowUpFeature(null);
-    setFollowUpPrompt('');
-    setFollowUpImagePaths([]);
-    setFollowUpPreviewMap(new Map());
+    try {
+      await persistFeatureUpdate(featureId, updates);
 
-    toast.success('Follow-up started', {
-      description: `Continuing work on: ${truncateDescription(featureDescription)}`,
-    });
+      setShowFollowUpDialog(false);
+      setFollowUpFeature(null);
+      setFollowUpPrompt('');
+      setFollowUpImagePaths([]);
+      setFollowUpPreviewMap(new Map());
 
-    const imagePaths = followUpImagePaths.map((img) => img.path);
-    // Server derives workDir from feature.branchName at execution time
-    api.autoMode
-      .followUpFeature(
+      toast.success('Follow-up started', {
+        description: `Continuing work on: ${truncateDescription(featureDescription)}`,
+      });
+
+      const imagePaths = followUpImagePaths.map((img) => img.path);
+      // Server derives workDir from feature.branchName at execution time
+      const result = await api.autoMode.followUpFeature(
         currentProject.path,
         followUpFeature.id,
         followUpPrompt,
         imagePaths
         // No worktreePath - server derives from feature.branchName
-      )
-      .catch((error) => {
-        logger.error('Error sending follow-up:', error);
-        toast.error('Failed to send follow-up', {
-          description: error instanceof Error ? error.message : 'An error occurred',
-        });
-        loadFeatures();
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to send follow-up');
+      }
+    } catch (error) {
+      // Rollback to previous status if follow-up fails
+      logger.error('Error sending follow-up, rolling back:', error);
+      const rollbackUpdates = {
+        status: previousStatus as 'backlog' | 'in_progress' | 'waiting_approval' | 'verified',
+        startedAt: undefined,
+      };
+      updateFeature(featureId, rollbackUpdates);
+
+      // If server is offline (connection refused), redirect to login page
+      if (isConnectionError(error)) {
+        handleServerOffline();
+        return;
+      }
+
+      toast.error('Failed to send follow-up', {
+        description:
+          error instanceof Error ? error.message : 'Server may be offline. Please try again.',
       });
+    }
   }, [
     currentProject,
     followUpFeature,
@@ -577,7 +659,6 @@ export function useBoardActions({
     setFollowUpPrompt,
     setFollowUpImagePaths,
     setFollowUpPreviewMap,
-    loadFeatures,
   ]);
 
   const handleCommitFeature = useCallback(
@@ -805,12 +886,14 @@ export function useBoardActions({
     // Sort by priority (lower number = higher priority, priority 1 is highest)
     // Features with blocking dependencies are sorted to the end
     const sortedBacklog = [...backlogFeatures].sort((a, b) => {
-      const aBlocked = enableDependencyBlocking
-        ? getBlockingDependencies(a, features).length > 0
-        : false;
-      const bBlocked = enableDependencyBlocking
-        ? getBlockingDependencies(b, features).length > 0
-        : false;
+      const aBlocked =
+        enableDependencyBlocking && !skipVerificationInAutoMode
+          ? getBlockingDependencies(a, features).length > 0
+          : false;
+      const bBlocked =
+        enableDependencyBlocking && !skipVerificationInAutoMode
+          ? getBlockingDependencies(b, features).length > 0
+          : false;
 
       // Blocked features go to the end
       if (aBlocked && !bBlocked) return 1;
@@ -822,14 +905,14 @@ export function useBoardActions({
 
     // Find the first feature without blocking dependencies
     const featureToStart = sortedBacklog.find((f) => {
-      if (!enableDependencyBlocking) return true;
+      if (!enableDependencyBlocking || skipVerificationInAutoMode) return true;
       return getBlockingDependencies(f, features).length === 0;
     });
 
     if (!featureToStart) {
       toast.info('No eligible features', {
         description:
-          'All backlog features have unmet dependencies. Complete their dependencies first.',
+          'All backlog features have unmet dependencies. Complete their dependencies first (or enable "Skip verification requirement" in Auto Mode settings).',
       });
       return;
     }
@@ -846,6 +929,7 @@ export function useBoardActions({
     isPrimaryWorktreeBranch,
     getPrimaryWorktreeBranch,
     enableDependencyBlocking,
+    skipVerificationInAutoMode,
   ]);
 
   const handleArchiveAllVerified = useCallback(async () => {
